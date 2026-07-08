@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
+
+from sqlalchemy import create_engine, delete, select
+from sqlalchemy.orm import Session
+
+from trading_service.models import Base, OrderModel, PositionModel, SignalModel
 
 
 @dataclass
@@ -30,13 +34,13 @@ class OrderRecord:
     """订单记录。"""
 
     id: str
-    position_id: str
     symbol: str
     direction: str
     size: float
     price: float
-    reason: str
     order_type: str
+    position_id: str = ""
+    reason: str = ""
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -55,7 +59,7 @@ class SignalRecord:
 
 
 class TradingStore(ABC):
-    """交易数据存储抽象接口。"""
+    """交易数据存储接口。"""
 
     @abstractmethod
     def save_position(self, position: PositionRecord) -> None:
@@ -63,13 +67,16 @@ class TradingStore(ABC):
 
     @abstractmethod
     def get_position(self, position_id: str) -> PositionRecord | None:
-        """获取单个持仓。"""
+        """获取持仓。"""
 
     @abstractmethod
-    def get_positions(
-        self, status: str | None = None, tag: str | None = None
+    def list_positions(
+        self,
+        symbol: str | None = None,
+        status: str | None = None,
+        tag: str | None = None,
     ) -> list[PositionRecord]:
-        """获取持仓列表。"""
+        """列出持仓。"""
 
     @abstractmethod
     def save_order(self, order: OrderRecord) -> None:
@@ -80,21 +87,21 @@ class TradingStore(ABC):
         """获取持仓的所有订单。"""
 
     @abstractmethod
-    def get_orders_filtered(
+    def list_orders(
         self,
         symbol: str | None = None,
         order_type: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[OrderRecord]:
-        """过滤查询订单。"""
+        """列出订单。"""
 
     @abstractmethod
     def save_signal(self, signal: SignalRecord) -> None:
         """保存信号。"""
 
     @abstractmethod
-    def get_signals_filtered(
+    def list_signals(
         self,
         symbol: str | None = None,
         severity_min: int | None = None,
@@ -104,61 +111,22 @@ class TradingStore(ABC):
         """过滤查询信号。"""
 
 
-class SqliteTradingStore(TradingStore):
-    """SQLite 实现的交易数据存储。"""
+# 添加缺失的 dataclasses import
+import sys
+from dataclasses import field as _field
+
+# 修复 dataclasses field 导入
+PositionRecord.__dataclass_fields__["created_at"].default_factory = lambda: datetime.now(timezone.utc)
+if "created_at" not in PositionRecord.__annotations__:
+    PositionRecord.__annotations__["created_at"] = datetime
+
+
+class SqlalchemyTradingStore(TradingStore):
+    """SQLAlchemy 实现的交易数据存储。"""
 
     def __init__(self, db_path: str) -> None:
-        self.db_path = db_path
-        self._init_tables()
-
-    def _get_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _init_tables(self) -> None:
-        with self._get_conn() as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS trading_positions (
-                    id TEXT PRIMARY KEY,
-                    symbol TEXT NOT NULL,
-                    direction TEXT NOT NULL,
-                    entry_price REAL NOT NULL,
-                    total_size REAL NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'open',
-                    exit_price REAL,
-                    tag TEXT NOT NULL DEFAULT '',
-                    tp_hit INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL,
-                    closed_at TEXT
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS trading_orders (
-                    id TEXT PRIMARY KEY,
-                    position_id TEXT NOT NULL DEFAULT '',
-                    symbol TEXT NOT NULL,
-                    direction TEXT NOT NULL,
-                    size REAL NOT NULL,
-                    price REAL NOT NULL,
-                    reason TEXT NOT NULL DEFAULT '',
-                    order_type TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS trading_signals (
-                    id TEXT PRIMARY KEY,
-                    symbol TEXT NOT NULL,
-                    signal_type TEXT NOT NULL,
-                    direction TEXT NOT NULL,
-                    severity INTEGER NOT NULL DEFAULT 0,
-                    description TEXT NOT NULL DEFAULT '',
-                    metadata TEXT NOT NULL DEFAULT '{}',
-                    created_at TEXT NOT NULL
-                )
-            """)
-            conn.commit()
+        self.db_url = f"sqlite:///{db_path}"
+        self.engine = create_engine(self.db_url, echo=False)
 
     def _dt_to_str(self, dt: datetime) -> str:
         return dt.isoformat()
@@ -169,212 +137,226 @@ class SqliteTradingStore(TradingStore):
         return datetime.fromisoformat(s)
 
     def save_position(self, position: PositionRecord) -> None:
-        with self._get_conn() as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO trading_positions
-                (id, symbol, direction, entry_price, total_size, status,
-                 exit_price, tag, tp_hit, created_at, closed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    position.id,
-                    position.symbol,
-                    position.direction,
-                    position.entry_price,
-                    position.total_size,
-                    position.status,
-                    position.exit_price,
-                    position.tag,
-                    position.tp_hit,
-                    self._dt_to_str(position.created_at),
-                    self._dt_to_str(position.closed_at) if position.closed_at else None,
-                ),
-            )
-            conn.commit()
+        with Session(self.engine) as session:
+            # 查询是否存在
+            existing = session.get(PositionModel, position.id)
+            if existing:
+                existing.symbol = position.symbol
+                existing.direction = position.direction
+                existing.entry_price = position.entry_price
+                existing.total_size = position.total_size
+                existing.status = position.status
+                existing.exit_price = position.exit_price
+                existing.tag = position.tag
+                existing.tp_hit = position.tp_hit
+                existing.created_at = self._dt_to_str(position.created_at)
+                existing.closed_at = self._dt_to_str(position.closed_at) if position.closed_at else None
+            else:
+                model = PositionModel(
+                    id=position.id,
+                    symbol=position.symbol,
+                    direction=position.direction,
+                    entry_price=position.entry_price,
+                    total_size=position.total_size,
+                    status=position.status,
+                    exit_price=position.exit_price,
+                    tag=position.tag,
+                    tp_hit=position.tp_hit,
+                    created_at=self._dt_to_str(position.created_at),
+                    closed_at=self._dt_to_str(position.closed_at) if position.closed_at else None,
+                )
+                session.add(model)
+            session.commit()
 
     def get_position(self, position_id: str) -> PositionRecord | None:
-        with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM trading_positions WHERE id = ?", (position_id,)
-            ).fetchone()
-            if row is None:
+        with Session(self.engine) as session:
+            model = session.get(PositionModel, position_id)
+            if model is None:
                 return None
             return PositionRecord(
-                id=row["id"],
-                symbol=row["symbol"],
-                direction=row["direction"],
-                entry_price=row["entry_price"],
-                total_size=row["total_size"],
-                status=row["status"],
-                exit_price=row["exit_price"],
-                tag=row["tag"],
-                tp_hit=row["tp_hit"],
-                created_at=self._str_to_dt(row["created_at"]),
-                closed_at=self._str_to_dt(row["closed_at"]),
+                id=model.id,
+                symbol=model.symbol,
+                direction=model.direction,
+                entry_price=model.entry_price,
+                total_size=model.total_size,
+                status=model.status,
+                exit_price=model.exit_price,
+                tag=model.tag,
+                tp_hit=model.tp_hit,
+                created_at=self._str_to_dt(model.created_at),
+                closed_at=self._str_to_dt(model.closed_at),
             )
 
-    def get_positions(
-        self, status: str | None = None, tag: str | None = None
+    def list_positions(
+        self,
+        symbol: str | None = None,
+        status: str | None = None,
+        tag: str | None = None,
     ) -> list[PositionRecord]:
-        query = "SELECT * FROM trading_positions WHERE 1=1"
-        params: list[Any] = []
-        if status is not None:
-            query += " AND status = ?"
-            params.append(status)
-        if tag is not None:
-            query += " AND tag LIKE ?"
-            params.append(f"%{tag}%")
-        query += " ORDER BY created_at DESC"
+        with Session(self.engine) as session:
+            query = select(PositionModel)
+            if symbol:
+                query = query.where(PositionModel.symbol == symbol)
+            if status:
+                query = query.where(PositionModel.status == status)
+            if tag:
+                query = query.where(PositionModel.tag == tag)
+            query = query.order_by(PositionModel.created_at.desc())
 
-        with self._get_conn() as conn:
-            rows = conn.execute(query, params).fetchall()
+            result = session.execute(query)
+            models = result.scalars().all()
+
             return [
                 PositionRecord(
-                    id=r["id"],
-                    symbol=r["symbol"],
-                    direction=r["direction"],
-                    entry_price=r["entry_price"],
-                    total_size=r["total_size"],
-                    status=r["status"],
-                    exit_price=r["exit_price"],
-                    tag=r["tag"],
-                    tp_hit=r["tp_hit"],
-                    created_at=self._str_to_dt(r["created_at"]),
-                    closed_at=self._str_to_dt(r["closed_at"]),
+                    id=m.id,
+                    symbol=m.symbol,
+                    direction=m.direction,
+                    entry_price=m.entry_price,
+                    total_size=m.total_size,
+                    status=m.status,
+                    exit_price=m.exit_price,
+                    tag=m.tag,
+                    tp_hit=m.tp_hit,
+                    created_at=self._str_to_dt(m.created_at),
+                    closed_at=self._str_to_dt(m.closed_at),
                 )
-                for r in rows
+                for m in models
             ]
 
     def save_order(self, order: OrderRecord) -> None:
-        with self._get_conn() as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO trading_orders
-                (id, position_id, symbol, direction, size, price, reason, order_type, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    order.id,
-                    order.position_id,
-                    order.symbol,
-                    order.direction,
-                    order.size,
-                    order.price,
-                    order.reason,
-                    order.order_type,
-                    self._dt_to_str(order.created_at),
-                ),
-            )
-            conn.commit()
+        with Session(self.engine) as session:
+            existing = session.get(OrderModel, order.id)
+            if existing:
+                existing.position_id = order.position_id
+                existing.symbol = order.symbol
+                existing.direction = order.direction
+                existing.size = order.size
+                existing.price = order.price
+                existing.reason = order.reason
+                existing.order_type = order.order_type
+                existing.created_at = self._dt_to_str(order.created_at)
+            else:
+                model = OrderModel(
+                    id=order.id,
+                    position_id=order.position_id,
+                    symbol=order.symbol,
+                    direction=order.direction,
+                    size=order.size,
+                    price=order.price,
+                    reason=order.reason,
+                    order_type=order.order_type,
+                    created_at=self._dt_to_str(order.created_at),
+                )
+                session.add(model)
+            session.commit()
 
     def get_orders_by_position(self, position_id: str) -> list[OrderRecord]:
-        with self._get_conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM trading_orders WHERE position_id = ? ORDER BY created_at ASC",
-                (position_id,),
-            ).fetchall()
+        with Session(self.engine) as session:
+            query = select(OrderModel).where(OrderModel.position_id == position_id).order_by(OrderModel.created_at)
+            result = session.execute(query)
+            models = result.scalars().all()
+
             return [
                 OrderRecord(
-                    id=r["id"],
-                    position_id=r["position_id"],
-                    symbol=r["symbol"],
-                    direction=r["direction"],
-                    size=r["size"],
-                    price=r["price"],
-                    reason=r["reason"],
-                    order_type=r["order_type"],
-                    created_at=self._str_to_dt(r["created_at"]),
+                    id=m.id,
+                    position_id=m.position_id,
+                    symbol=m.symbol,
+                    direction=m.direction,
+                    size=m.size,
+                    price=m.price,
+                    reason=m.reason,
+                    order_type=m.order_type,
+                    created_at=self._str_to_dt(m.created_at),
                 )
-                for r in rows
+                for m in models
             ]
 
-    def get_orders_filtered(
+    def list_orders(
         self,
         symbol: str | None = None,
         order_type: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[OrderRecord]:
-        query = "SELECT * FROM trading_orders WHERE 1=1"
-        params: list[Any] = []
-        if symbol is not None:
-            query += " AND symbol = ?"
-            params.append(symbol)
-        if order_type is not None:
-            query += " AND order_type = ?"
-            params.append(order_type)
-        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
+        with Session(self.engine) as session:
+            query = select(OrderModel)
+            if symbol:
+                query = query.where(OrderModel.symbol == symbol)
+            if order_type:
+                query = query.where(OrderModel.order_type == order_type)
+            query = query.order_by(OrderModel.created_at.desc()).limit(limit).offset(offset)
 
-        with self._get_conn() as conn:
-            rows = conn.execute(query, params).fetchall()
+            result = session.execute(query)
+            models = result.scalars().all()
+
             return [
                 OrderRecord(
-                    id=r["id"],
-                    position_id=r["position_id"],
-                    symbol=r["symbol"],
-                    direction=r["direction"],
-                    size=r["size"],
-                    price=r["price"],
-                    reason=r["reason"],
-                    order_type=r["order_type"],
-                    created_at=self._str_to_dt(r["created_at"]),
+                    id=m.id,
+                    position_id=m.position_id,
+                    symbol=m.symbol,
+                    direction=m.direction,
+                    size=m.size,
+                    price=m.price,
+                    reason=m.reason,
+                    order_type=m.order_type,
+                    created_at=self._str_to_dt(m.created_at),
                 )
-                for r in rows
+                for m in models
             ]
 
     def save_signal(self, signal: SignalRecord) -> None:
-        with self._get_conn() as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO trading_signals
-                (id, symbol, signal_type, direction, severity, description, metadata, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    signal.id,
-                    signal.symbol,
-                    signal.signal_type,
-                    signal.direction,
-                    signal.severity,
-                    signal.description,
-                    json.dumps(signal.metadata),
-                    self._dt_to_str(signal.created_at),
-                ),
-            )
-            conn.commit()
+        with Session(self.engine) as session:
+            existing = session.get(SignalModel, signal.id)
+            if existing:
+                existing.symbol = signal.symbol
+                existing.signal_type = signal.signal_type
+                existing.direction = signal.direction
+                existing.severity = signal.severity
+                existing.description = signal.description
+                existing.metadata = json.dumps(signal.metadata)
+                existing.created_at = self._dt_to_str(signal.created_at)
+            else:
+                model = SignalModel(
+                    id=signal.id,
+                    symbol=signal.symbol,
+                    signal_type=signal.signal_type,
+                    direction=signal.direction,
+                    severity=signal.severity,
+                    description=signal.description,
+                    metadata_json=json.dumps(signal.metadata),
+                    created_at=self._dt_to_str(signal.created_at),
+                )
+                session.add(model)
+            session.commit()
 
-    def get_signals_filtered(
+    def list_signals(
         self,
         symbol: str | None = None,
         severity_min: int | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[SignalRecord]:
-        query = "SELECT * FROM trading_signals WHERE 1=1"
-        params: list[Any] = []
-        if symbol is not None:
-            query += " AND symbol = ?"
-            params.append(symbol)
-        if severity_min is not None:
-            query += " AND severity >= ?"
-            params.append(severity_min)
-        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
+        with Session(self.engine) as session:
+            query = select(SignalModel)
+            if symbol:
+                query = query.where(SignalModel.symbol == symbol)
+            if severity_min is not None:
+                query = query.where(SignalModel.severity >= severity_min)
+            query = query.order_by(SignalModel.created_at.desc()).limit(limit).offset(offset)
 
-        with self._get_conn() as conn:
-            rows = conn.execute(query, params).fetchall()
+            result = session.execute(query)
+            models = result.scalars().all()
+
             return [
                 SignalRecord(
-                    id=r["id"],
-                    symbol=r["symbol"],
-                    signal_type=r["signal_type"],
-                    direction=r["direction"],
-                    severity=r["severity"],
-                    description=r["description"],
-                    metadata=json.loads(r["metadata"]),
-                    created_at=self._str_to_dt(r["created_at"]),
+                    id=m.id,
+                    symbol=m.symbol,
+                    signal_type=m.signal_type,
+                    direction=m.direction,
+                    severity=m.severity,
+                    description=m.description,
+                    metadata_json=json.loads(m.metadata_json),
+                    created_at=self._str_to_dt(m.created_at),
                 )
-                for r in rows
+                for m in models
             ]

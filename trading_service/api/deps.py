@@ -6,13 +6,13 @@ from fastapi import Depends
 
 from trading_service.config import settings
 from trading_service.exchange import MockExchange
-from trading_service.store import SqliteTradingStore
+from trading_service.store import SqlalchemyTradingStore
 from trading_service.strategies.martingale import MartingaleConfig, MartingaleStrategy
 from trading_service.strategies.micro_cap import MicroCapConfig, MicroCapStrategy
 from trading_service.strategies.symbol_picker import StaticListSymbolPicker
 
 # 全局单例
-_trading_store = SqliteTradingStore(settings.db_path)
+_trading_store = SqlalchemyTradingStore(settings.db_path)
 _exchange = MockExchange(db=_trading_store)
 _martingale_strategy = MartingaleStrategy(
     exchange=_exchange,

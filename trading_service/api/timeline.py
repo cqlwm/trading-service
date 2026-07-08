@@ -42,9 +42,9 @@ def _serialize_event_data(data: SignalRecord | Order | CloseResult) -> dict[str,
 
 @router.get("/timeline")
 async def get_timeline(
+    exchange: ExchangeDep,
     limit: int = 50,
     offset: int = 0,
-    exchange: ExchangeDep,
 ) -> list[dict]:
     """获取全局交易活动时间线（信号+订单+平仓），按时间倒序。"""
     events = exchange.get_timeline(limit=limit, offset=offset)

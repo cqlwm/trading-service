@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from trading_service.api import positions, orders, signals, timeline, strategies
 from trading_service.config import settings
+from trading_service.migration_check import check_migrations, run_migrations
 
 logging.basicConfig(
     level=logging.INFO if not settings.debug else logging.DEBUG,
@@ -17,12 +18,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def validate_migrations() -> None:
+    """校验数据库迁移是否是最新的。"""
+    is_latest, current_rev, head_rev = check_migrations(settings.db_path)
+
+    if is_latest:
+        logger.info(f"✅ Database schema is up to date (revision: {current_rev})")
+    else:
+        logger.warning(f"⚠️  Database schema is outdated!")
+        logger.warning(f"   Current revision: {current_rev}")
+        logger.warning(f"   Latest revision:  {head_rev}")
+        logger.warning("   Auto-running migrations...")
+        run_migrations(settings.db_path)
+        logger.info("✅ Migrations completed successfully")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """服务生命周期管理。"""
     logger.info(f"🚀 Trading Service starting on {settings.host}:{settings.port}")
     logger.info(f"📦 Database: {settings.db_path}")
     logger.info(f"🌐 News Service: {settings.news_service_base_url}")
+
+    # 启动时校验并运行数据库迁移
+    validate_migrations()
+
     yield
     logger.info("👋 Trading Service shutdown complete")
 

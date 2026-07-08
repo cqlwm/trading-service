@@ -10,7 +10,7 @@ from trading_service.store import (
     OrderRecord,
     PositionRecord,
     SignalRecord,
-    SqliteTradingStore,
+    SqlalchemyTradingStore,
     TradingStore,
 )
 from trading_service.types import OrderType, TradeDirection

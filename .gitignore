@@ -8,6 +8,7 @@ wheels/
 
 # IDE
 .idea/
+.vscode/
 
 # Virtual environments
 .venv
@@ -15,3 +16,15 @@ wheels/
 # Local configuration (sensitive data)
 config.local.yaml
 .env
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Alembic migration logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -9,11 +9,11 @@ router = APIRouter(tags=["signals"])
 
 @router.get("")
 async def list_signals(
+    exchange: ExchangeDep,
     symbol: str | None = None,
     severity_min: int | None = None,
     limit: int = 50,
     offset: int = 0,
-    exchange: ExchangeDep,
 ) -> list[dict]:
     """查询信号列表，支持按 symbol/severity 过滤和分页。"""
     signals = exchange.get_signals_filtered(

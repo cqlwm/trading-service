@@ -104,7 +104,34 @@ flowchart LR
 - 枚举值使用小写 snake_case：`long` / `short` / `open` / `closed`
 - ID 统一使用 UUID 前 12 位：`uuid.uuid4().hex[:12]`
 
-### （三）事务一致性原则
+### （三）Schema 管理与 ORM
+
+**技术栈**：SQLAlchemy 2.0 + Alembic
+
+**Schema 定义流程**：
+1. 模型定义在 `trading_service/models.py`（唯一真值源）
+2. 变更模型后运行 `alembic revision --autogenerate -m "描述"` 生成迁移脚本
+3. 检查并调整生成的迁移脚本（`migrations/versions/`）
+4. 应用启动时自动检测并执行未完成的迁移
+
+**迁移命令**：
+```bash
+# 生成迁移脚本
+alembic revision --autogenerate -m "描述变更"
+
+# 执行到最新版本
+alembic upgrade head
+
+# 回退一个版本
+alembic downgrade -1
+```
+
+**禁止操作**：
+- ❌ 直接在生产环境执行手工 DDL
+- ❌ 绕过迁移系统直接修改表结构
+- ❌ 编辑已提交的迁移脚本（必须新建迁移）
+
+### （四）事务一致性原则
 
 **持仓变更必须与订单写入在同一事务中：**
 
@@ -219,7 +246,9 @@ class MyStrategy:
 graph LR
     Strategy -->|只调用公开接口| MockExchange
     MockExchange -->|封装读写| TradingStore
-    TradingStore -->|DB操作| SQLite
+    TradingStore -->|ORM| SQLAlchemy
+    SQLAlchemy -->|DDL生成| Alembic
+    Alembic -->|迁移管理| SQLite
 
     Strategy -->|禁止直接读写DB| SQLite
 ```
