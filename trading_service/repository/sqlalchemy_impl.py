@@ -237,17 +237,33 @@ class SqlalchemyTradingStore(TradingRepository):
 
             result = session.execute(query)
             models = result.scalars().all()
+            return [self._signal_model_to_record(m) for m in models]
 
-            return [
-                SignalRecord(
-                    id=m.id,
-                    symbol=m.symbol,
-                    signal_type=m.signal_type,
-                    direction=m.direction,
-                    severity=m.severity,
-                    description=m.description,
-                    metadata_json=json.loads(m.metadata_json),
-                    created_at=self._str_to_dt(m.created_at),
-                )
-                for m in models
-            ]
+
+    def _signal_model_to_record(self, model) -> SignalRecord:
+        return SignalRecord(
+            id=model.id,
+            symbol=model.symbol,
+            signal_type=model.signal_type,
+            direction=model.direction,
+            severity=model.severity,
+            description=model.description,
+            metadata_json=model.metadata_json or {},
+            created_at=self._str_to_dt(model.created_at),
+        )
+
+    def begin(self) -> None:
+        """开始事务（SQLAlchemy 是隐式的，这里占位）。"""
+        pass
+
+    def commit(self) -> None:
+        """提交事务（SQLAlchemy 每次操作自动提交）。"""
+        pass
+
+    def rollback(self) -> None:
+        """回滚事务 - 当前实现不支持真正的回滚。
+        
+        注意：当前的 SQLAlchemy 实现是每条语句自动 commit 的，
+        如果需要真正的事务支持，需要重构为 session 模式。
+        """
+        pass

@@ -5,7 +5,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
 
 
 @dataclass
@@ -50,7 +49,7 @@ class SignalRecord:
     direction: str
     severity: int = 0
     description: str = ""
-    metadata_json: dict[str, Any] = field(default_factory=dict)
+    metadata_json: dict[str, object] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -134,3 +133,41 @@ class TradingRepository(ABC):
     ) -> list[SignalRecord]:
         """列出信号（别名，向后兼容）"""
         return self.list_signals(symbol, severity_min, limit, offset)
+
+    def transaction(self) -> "TransactionContext":
+        """事务上下文管理器。
+        
+        with repo.transaction():
+            repo.save_position(...)
+            repo.save_order(...)
+        """
+        return TransactionContext(self)
+
+    @abstractmethod
+    def begin(self) -> None:
+        """开始事务"""
+
+    @abstractmethod
+    def commit(self) -> None:
+        """提交事务"""
+
+    @abstractmethod
+    def rollback(self) -> None:
+        """回滚事务"""
+
+
+class TransactionContext:
+    """事务上下文管理器。"""
+
+    def __init__(self, repo: TradingRepository) -> None:
+        self.repo = repo
+
+    def __enter__(self) -> "TransactionContext":
+        self.repo.begin()
+        return self
+
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        if exc_type is not None:
+            self.repo.rollback()
+        else:
+            self.repo.commit()

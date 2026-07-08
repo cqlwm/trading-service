@@ -192,28 +192,46 @@ class MockExchange:
             ],
         }
 
-    def close_position(self, position_id: str, reason: str = "manual") -> CloseResult | None:
-        """手动平仓。"""
-        pos = self.get_position(position_id)
-        if pos is None or pos.status != "open":
-            return None
+    def close_position(
+        self,
+        position_id: str,
+        price: float | None = None,
+        reason: str = "manual",
+    ) -> CloseResult | None:
+        """平仓 - 关闭持仓并创建 CLOSE 订单（原子事务）。"""
+        with self.db.transaction():
+            pos = self.get_position(position_id)
+            if pos is None or pos.status != "open":
+                return None
 
-        # 简化：用入场价作为平仓价（实际应该获取市场价）
-        close_price = pos.entry_price
-        pnl_pct = pos.pnl_pct(close_price)
+            # 如果未指定价格，使用入场价作为默认（实际应该获取市场价）
+            actual_price = price if price is not None else pos.entry_price
 
-        pos.status = "closed"
-        pos.exit_price = close_price
-        pos.closed_at = datetime.now(timezone.utc)
-        self.db.save_position(pos.to_record())
+            pnl_pct = pos.pnl_pct(actual_price)
+
+            pos.status = "closed"
+            pos.exit_price = actual_price
+            pos.closed_at = datetime.now(timezone.utc)
+            self.db.save_position(pos.to_record())
+
+            order_record = OrderRecord(
+                id=self._new_id(),
+                position_id=position_id,
+                symbol=pos.symbol,
+                direction=pos.direction.value,
+                size=pos.total_size,
+                price=actual_price,
+                order_type=OrderType.CLOSE.value,
+                reason=reason,
+            )
+            self.db.save_order(order_record)
 
         return CloseResult(
             position_id=position_id,
-            close_price=close_price,
+            close_price=actual_price,
             pnl_pct=pnl_pct,
             reason=reason,
         )
-
     def get_orders_filtered(
         self,
         symbol: str | None = None,
@@ -277,3 +295,78 @@ class MockExchange:
         """获取最新价格（占位实现 - 实际通过 news-service API 获取）。"""
         # TODO: 通过 news-service API 获取价格
         return {s: 0.0 for s in symbols}
+
+
+    def open_position(
+        self,
+        symbol: str,
+        direction: TradeDirection,
+        size: float,
+        price: float,
+        tag: str,
+        reason: str,
+    ) -> Position:
+        """开仓 - 创建持仓和对应的 OPEN 订单（原子事务）。"""
+        with self.db.transaction():
+            position = Position(
+                id=self._new_id(),
+                symbol=symbol,
+                direction=direction,
+                entry_price=price,
+                total_size=size,
+                tag=tag,
+                status="open",
+            )
+            self.db.save_position(position.to_record())
+
+            order_record = OrderRecord(
+                id=self._new_id(),
+                position_id=position.id,
+                symbol=symbol,
+                direction=direction.value,
+                size=size,
+                price=price,
+                order_type=OrderType.OPEN.value,
+                reason=reason,
+            )
+            self.db.save_order(order_record)
+
+        return position
+
+    def add_position(
+        self,
+        position_id: str,
+        size: float,
+        price: float,
+        reason: str,
+    ) -> Position:
+        """加仓 - 增加持仓数量并创建 ADD 订单（原子事务）。"""
+        with self.db.transaction():
+            position = self.get_position(position_id)
+            if position is None:
+                raise ValueError(f"Position not found: {position_id}")
+
+            # 计算新的加权平均价格
+            total_cost = position.entry_price * position.total_size + price * size
+            new_total_size = position.total_size + size
+            new_avg_price = total_cost / new_total_size
+
+            # 更新持仓
+            position.total_size = new_total_size
+            position.entry_price = new_avg_price
+            self.db.save_position(position.to_record())
+
+            # 创建 ADD 订单
+            order_record = OrderRecord(
+                id=self._new_id(),
+                position_id=position_id,
+                symbol=position.symbol,
+                direction=position.direction.value,
+                size=size,
+                price=price,
+                order_type=OrderType.ADD.value,
+                reason=reason,
+            )
+            self.db.save_order(order_record)
+
+        return position

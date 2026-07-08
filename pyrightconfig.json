@@ -1,0 +1,23 @@
+{
+    "include": [
+        "trading_service",
+        "tests"
+    ],
+    "exclude": [
+        "migrations",
+        ".venv",
+        "**/__pycache__"
+    ],
+    "reportMissingImports": false,
+    "reportMissingTypeStubs": false,
+    "reportUnknownMemberType": false,
+    "reportUnknownVariableType": false,
+    "reportUnknownArgumentType": false,
+    "reportUntypedBaseClass": false,
+    "reportUntypedFunctionDecorator": false,
+    "reportUnusedImport": true,
+    "reportUnusedExpression": true,
+    "reportUnnecessaryIsInstance": false,
+    "reportUnnecessaryComparison": false,
+    "pythonVersion": "3.14"
+}
