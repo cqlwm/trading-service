@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import uuid
 
-
-
 import pytest
 
 from trading_service.exchange import MockExchange
@@ -14,6 +12,36 @@ from trading_service.repository import (
     SignalRecord,
     TradingRepository,
 )
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """添加命令行选项。"""
+    parser.addoption(
+        "--run-integration",
+        action="store_true",
+        default=False,
+        help="运行集成测试（需要网络）",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """注册自定义 markers。"""
+    config.addinivalue_line(
+        "markers",
+        "integration: 标记需要外部服务的集成测试",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """根据命令行选项跳过测试。"""
+    if config.getoption("--run-integration"):
+        # 如果指定了 --run-integration，不跳过任何测试
+        return
+    # 默认跳过 integration 测试
+    skip_integration = pytest.mark.skip(reason="需要 --run-integration 选项才运行")
+    for item in items:
+        if "integration" in item.keywords:
+            item.add_marker(skip_integration)
 
 
 class InMemoryTradingRepository(TradingRepository):
