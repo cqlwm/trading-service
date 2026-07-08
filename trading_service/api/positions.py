@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -17,7 +18,7 @@ async def _fetch_open_prices(
     if not symbols:
         return {}
 
-    ccxt_symbols = [Symbol.from_str(s).ccxt() for s in symbols]
+    ccxt_symbols = [Symbol.parse(s).ccxt() for s in symbols]
     return await exchange.fetch_prices(ccxt_symbols)
 
 
@@ -25,7 +26,7 @@ async def _fetch_open_prices(
 async def list_positions(
     status: str | None = None,
     exchange: MockExchange = Depends(get_exchange),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """查看所有持仓（含历史），可按状态过滤。"""
     resolved_status = status if status in ("open", "closed") else None
     positions = exchange.get_positions(status=resolved_status)
@@ -44,7 +45,7 @@ async def list_positions(
             "entry_price": p.entry_price,
             "avg_price": p.entry_price,
             "current_price": prices.get(
-                Symbol.from_str(p.symbol).ccxt(), p.exit_price or p.entry_price
+                Symbol.parse(p.symbol).ccxt(), p.exit_price or p.entry_price
             ),
             "total_size": p.total_size,
             "status": p.status,
@@ -60,7 +61,7 @@ async def list_positions(
             "layers": len([o for o in p.orders if o.order_type == "ADD"]) + 1,
             "tp_hit": p.tp_hit,
             "pnl_pct": round(
-                p.pnl_pct(prices.get(Symbol.from_str(p.symbol).ccxt(), 0.0)), 2
+                p.pnl_pct(prices.get(Symbol.parse(p.symbol).ccxt(), 0.0)), 2
             )
             if p.status == "open"
             else round(p.final_pnl_pct, 2)
@@ -77,7 +78,7 @@ async def list_positions(
 async def get_position(
     position_id: str,
     exchange: MockExchange = Depends(get_exchange),
-) -> dict:
+) -> dict[str, Any]:
     """查看单个持仓详情。"""
     context = exchange.get_position_context(position_id)
     if context is None:
@@ -89,7 +90,7 @@ async def get_position(
 async def get_position_actions(
     position_id: str,
     exchange: MockExchange = Depends(get_exchange),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """获取持仓的所有订单记录。"""
     pos = exchange.get_position(position_id)
     if pos is None:
@@ -112,7 +113,7 @@ async def get_position_actions(
 async def close_position(
     position_id: str,
     exchange: MockExchange = Depends(get_exchange),
-) -> dict:
+) -> dict[str, Any]:
     """手动平仓指定持仓。"""
     result = exchange.close_position(position_id)
     if result is None:

@@ -27,5 +27,10 @@ reportUnnecessaryComparison = "warning"
 requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"
 
+[dependency-groups]
+dev = [
+    "pyright>=1.1.411",
+]
+
 [tool.setuptools]
 packages = ["trading_service"]

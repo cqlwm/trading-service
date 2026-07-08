@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from typing import AsyncGenerator, Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,7 +35,7 @@ def validate_migrations() -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[Any, None]:
     """服务生命周期管理。"""
     logger.info(f"🚀 Trading Service starting on {settings.host}:{settings.port}")
     logger.info(f"📦 Database: {settings.db_path}")
@@ -72,7 +73,7 @@ app.include_router(strategies.router, prefix="/api/strategies")
 
 
 @app.get("/")
-async def root() -> dict:
+async def root() -> dict[str, str]:
     """根路径健康检查。"""
     return {
         "service": "trading-service",
@@ -82,7 +83,7 @@ async def root() -> dict:
 
 
 @app.get("/health")
-async def health() -> dict:
+async def health() -> dict[str, str]:
     """健康检查端点。"""
     return {
         "status": "healthy",

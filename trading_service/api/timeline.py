@@ -5,12 +5,13 @@ from typing import Any
 from fastapi import APIRouter
 
 from trading_service.api.deps import ExchangeDep
-from trading_service.exchange import CloseResult, Order, SignalRecord
+from trading_service.exchange import CloseResult
+from trading_service.store import SignalRecord, OrderRecord
 
 router = APIRouter(tags=["timeline"])
 
 
-def _serialize_event_data(data: SignalRecord | Order | CloseResult) -> dict[str, Any]:
+def _serialize_event_data(data: SignalRecord | OrderRecord | CloseResult) -> dict[str, Any]:
     """序列化事件数据。"""
     if isinstance(data, SignalRecord):
         return {
@@ -20,12 +21,12 @@ def _serialize_event_data(data: SignalRecord | Order | CloseResult) -> dict[str,
             "direction": data.direction,
             "severity": data.severity,
             "description": data.description,
-            "metadata": data.metadata,
+            "metadata": data.metadata_json,
         }
-    elif isinstance(data, Order):
+    elif isinstance(data, OrderRecord):
         return {
             "id": data.id,
-            "order_type": data.order_type.value,
+            "order_type": data.order_type,
             "size": data.size,
             "price": data.price,
             "reason": data.reason,
@@ -45,7 +46,7 @@ async def get_timeline(
     exchange: ExchangeDep,
     limit: int = 50,
     offset: int = 0,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """获取全局交易活动时间线（信号+订单+平仓），按时间倒序。"""
     events = exchange.get_timeline(limit=limit, offset=offset)
     return [
@@ -62,7 +63,7 @@ async def get_timeline(
 async def get_trade_story(
     symbol: str,
     exchange: ExchangeDep,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """获取某个 Symbol 的交易故事（信号+订单+平仓时间线）。"""
     story = exchange.get_trade_story(symbol)
     return [

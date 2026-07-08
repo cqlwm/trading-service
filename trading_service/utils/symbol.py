@@ -35,5 +35,9 @@ class Symbol:
             return False
         return self.base == other.base and self.quote == other.quote
 
+
+    def ccxt(self) -> str:
+        """返回 ccxt 兼容的 symbol 格式。"""
+        return str(self)
     def __hash__(self) -> int:
         return hash((self.base, self.quote))

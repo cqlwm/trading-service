@@ -10,7 +10,6 @@ from trading_service.store import (
     OrderRecord,
     PositionRecord,
     SignalRecord,
-    SqlalchemyTradingStore,
     TradingStore,
 )
 from trading_service.types import OrderType, TradeDirection

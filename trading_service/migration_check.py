@@ -16,14 +16,14 @@ def get_current_revision(db_url: str) -> str | None:
         return context.get_current_revision()
 
 
-def get_head_revision() -> str:
+def get_head_revision() -> str | None:
     """获取代码的最新版本。"""
     alembic_cfg = Config("alembic.ini")
     script = ScriptDirectory.from_config(alembic_cfg)
     return script.get_current_head()
 
 
-def check_migrations(db_path: str) -> tuple[bool, str, str]:
+def check_migrations(db_path: str) -> tuple[bool, str | None, str | None]:
     """检查数据库迁移是否是最新的。
 
     Returns:

@@ -314,6 +314,32 @@ context = exchange.get_position_context(position_id)
 
 ---
 
+### （三）Pyright 类型检查
+
+**所有代码必须通过 Pyright strict 模式检查！**
+
+检查命令：
+
+```bash
+# 完整检查（推荐）
+.venv/bin/pyright
+
+# 或监听模式（开发时使用）
+.venv/bin/pyright --watch
+```
+
+**配置文件：** `pyrightconfig.json` 已在项目根目录预配置，包含：
+- `typeCheckingMode: "strict"` - 严格模式检查
+- 排除 `tests/`、`migrations/`、`.venv/` 目录
+- 禁用了外部库缺失类型 stubs 的警告
+
+**注意事项：**
+- 提交代码前必须运行完整检查
+- 0 errors, 0 warnings 才算通过
+- 新增文件会自动被纳入检查范围
+
+---
+
 ## 九、跨服务集成规范
 
 ### （一）与 News Service 交互边界

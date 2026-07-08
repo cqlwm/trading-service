@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any
 
 from dataclasses import dataclass
 
@@ -39,7 +40,7 @@ class MartingaleStrategy(Strategy):
         # 简化实现
         print(f"MartingaleStrategy.execute: {len(symbols)} symbols")
 
-    def get_status(self) -> dict:
+    def get_status(self) -> dict[str, Any]:
         """获取策略状态。"""
         positions = self.exchange.get_positions(tag="martingale")
         return {

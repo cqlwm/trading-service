@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any
 
 from trading_service.exchange import MockExchange
 from trading_service.strategies.base import Strategy, StrategyConfig
@@ -53,7 +54,7 @@ class MicroCapStrategy(Strategy):
         symbols = await self.symbol_picker.pick()
         print(f"MicroCapStrategy.execute: {len(symbols)} symbols")
 
-    def get_status(self) -> dict:
+    def get_status(self) -> dict[str, Any]:
         """获取策略状态。"""
         positions = self.exchange.get_positions(tag="micro_cap")
         return {
@@ -66,7 +67,7 @@ class MicroCapStrategy(Strategy):
             "total_positions": len(positions),
         }
 
-    def get_history(self, limit: int = 10) -> list[dict]:
+    def get_history(self, limit: int = 10) -> list[dict[str, Any]]:
         """获取历史记录。"""
         positions = self.exchange.get_positions(tag="micro_cap")
         return [

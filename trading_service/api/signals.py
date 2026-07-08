@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any
 
 from fastapi import APIRouter
 
@@ -14,7 +15,7 @@ async def list_signals(
     severity_min: int | None = None,
     limit: int = 50,
     offset: int = 0,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """查询信号列表，支持按 symbol/severity 过滤和分页。"""
     signals = exchange.get_signals_filtered(
         symbol=symbol,
@@ -30,7 +31,7 @@ async def list_signals(
             "direction": s.direction,
             "severity": s.severity,
             "description": s.description,
-            "metadata": s.metadata,
+            "metadata": s.metadata_json,
             "created_at": s.created_at.isoformat(),
         }
         for s in signals

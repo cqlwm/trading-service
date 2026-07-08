@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any
 
 from fastapi import APIRouter, Depends
 
@@ -15,7 +16,7 @@ async def list_orders(
     limit: int = 50,
     offset: int = 0,
     exchange: MockExchange = Depends(ExchangeDep),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """查询订单列表，支持按 symbol/order_type 过滤和分页。"""
     orders = exchange.get_orders_filtered(
         symbol=symbol,

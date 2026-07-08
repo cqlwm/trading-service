@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -30,5 +31,5 @@ class Strategy(ABC):
         """执行策略。"""
 
     @abstractmethod
-    def get_status(self) -> dict:
+    def get_status(self) -> dict[str, Any]:
         """获取策略状态。"""
