@@ -2,7 +2,7 @@
 name = "trading-service"
 version = "0.1.0"
 description = "Trading Service - 独立交易服务，包含策略引擎、仓位管理、订单执行"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
