@@ -3,11 +3,19 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings.sources import YamlConfigSettingsSource
 
 
 class Settings(BaseSettings):
-    """Trading Service 配置。"""
+    """Trading Service 配置。
+
+    配置加载优先级（从高到低）：
+    1. 环境变量（TRADING_ 前缀）
+    2. config.local.yaml（本地配置，不提交到 git）
+    3. config.yaml（默认配置，提交到 git）
+    4. 默认值
+    """
 
     # 服务配置
     host: str = "0.0.0.0"
@@ -15,7 +23,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # 数据库配置（共享 SQLite）
-    db_path: str = str(Path.home() / "projects" / "news-service" / "news.db")
+    db_path: str = str(Path.home() / "projects" / "db" / "news.db")
 
     # News Service API 配置
     news_service_base_url: str = "http://127.0.0.1:8000"
@@ -25,13 +33,48 @@ class Settings(BaseSettings):
     binance_api_key: str = ""
     binance_api_secret: str = ""
 
-    class Config:
-        env_prefix = "TRADING_"
-        env_file = ".env"
+    model_config = SettingsConfigDict(
+        env_prefix="TRADING_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        """自定义配置源加载顺序。"""
+        sources = [
+            init_settings,
+            env_settings,
+            dotenv_settings,
+        ]
+
+        # 优先加载本地配置文件（如果存在）
+        local_config = Path("config.local.yaml")
+        if local_config.exists():
+            sources.append(
+                YamlConfigSettingsSource(settings_cls, yaml_file=str(local_config))
+            )
+
+        # 然后加载默认配置文件
+        default_config = Path("config.yaml")
+        if default_config.exists():
+            sources.append(
+                YamlConfigSettingsSource(settings_cls, yaml_file=str(default_config))
+            )
+
+        sources.append(file_secret_settings)
+        return tuple(sources)
 
 
 settings = Settings()
 
 # 确保 DB 路径存在
-DB_PARENT = Path(settings.db_path).parent
+DB_PARENT = Path(settings.db_path).expanduser().parent
 DB_PARENT.mkdir(parents=True, exist_ok=True)

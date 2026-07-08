@@ -1,0 +1,18 @@
+# Trading Service 配置文件
+# 复制此文件为 config.local.yaml 并修改敏感配置（不会提交到 git）
+
+# 服务配置
+host: "0.0.0.0"
+port: 8001
+debug: false
+
+# 数据库配置（共享 SQLite）
+db_path: "~/projects/db/news.db"
+
+# News Service API 配置
+news_service_base_url: "http://127.0.0.1:8000"
+news_service_timeout: 30
+
+# 交易所配置
+binance_api_key: ""
+binance_api_secret: ""
