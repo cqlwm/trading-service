@@ -6,7 +6,7 @@ from fastapi import APIRouter
 
 from trading_service.api.deps import ExchangeDep
 from trading_service.exchange import CloseResult
-from trading_service.store import SignalRecord, OrderRecord
+from trading_service.repository import SignalRecord, OrderRecord
 
 router = APIRouter(tags=["timeline"])
 

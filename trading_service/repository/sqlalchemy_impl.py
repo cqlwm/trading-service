@@ -1,165 +1,19 @@
+"""SQLAlchemy Repository 实现"""
+
 from __future__ import annotations
 
 import json
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from trading_service.models import OrderModel, PositionModel, SignalModel
+from trading_service.repository.abc import OrderRecord, PositionRecord, SignalRecord, TradingRepository
+from trading_service.repository.models import OrderModel, PositionModel, SignalModel
 
 
-@dataclass
-class PositionRecord:
-    """持仓记录。"""
-
-    id: str
-    symbol: str
-    direction: str
-    entry_price: float
-    total_size: float
-    status: str = "open"
-    exit_price: float | None = None
-    tag: str = ""
-    tp_hit: int = 0
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    closed_at: datetime | None = None
-
-
-@dataclass
-class OrderRecord:
-    """订单记录。"""
-
-    id: str
-    symbol: str
-    direction: str
-    size: float
-    price: float
-    order_type: str
-    position_id: str = ""
-    reason: str = ""
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-@dataclass
-class SignalRecord:
-    """信号记录。"""
-
-    id: str
-    symbol: str
-    signal_type: str
-    direction: str
-    severity: int = 0
-    description: str = ""
-    metadata_json: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-    id: str
-    symbol: str
-    signal_type: str
-    direction: str
-    severity: int = 0
-    description: str = ""
-    metadata_json: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class TradingStore(ABC):
-    """交易数据存储接口。"""
-
-    @abstractmethod
-    def save_position(self, position: PositionRecord) -> None:
-        """保存持仓。"""
-
-    @abstractmethod
-    def get_position(self, position_id: str) -> PositionRecord | None:
-        """获取持仓。"""
-
-    @abstractmethod
-    def get_positions(
-        self,
-        symbol: str | None = None,
-        status: str | None = None,
-        tag: str | None = None,
-    ) -> list[PositionRecord]:
-        """获取持仓列表（别名，兼容旧代码）。"""
-
-    @abstractmethod
-    def list_positions(
-        self,
-        symbol: str | None = None,
-        status: str | None = None,
-        tag: str | None = None,
-    ) -> list[PositionRecord]:
-        """列出持仓。"""
-
-    @abstractmethod
-    def save_order(self, order: OrderRecord) -> None:
-        """保存订单。"""
-
-    @abstractmethod
-    def get_orders_by_position(self, position_id: str) -> list[OrderRecord]:
-        """获取持仓的所有订单。"""
-
-    @abstractmethod
-    def get_orders_filtered(
-        self,
-        symbol: str | None = None,
-        order_type: str | None = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[OrderRecord]:
-        """获取订单列表（别名，兼容旧代码）。"""
-
-    @abstractmethod
-    def list_orders(
-        self,
-        symbol: str | None = None,
-        order_type: str | None = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[OrderRecord]:
-        """列出订单。"""
-
-    @abstractmethod
-    def save_signal(self, signal: SignalRecord) -> None:
-        """保存信号。"""
-
-    @abstractmethod
-    def get_signals_filtered(
-        self,
-        symbol: str | None = None,
-        severity_min: int | None = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[SignalRecord]:
-        """获取信号列表（别名，兼容旧代码）。"""
-
-    @abstractmethod
-    def list_signals(
-        self,
-        symbol: str | None = None,
-        severity_min: int | None = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[SignalRecord]:
-        """过滤查询信号。"""
-
-
-# 添加缺失的 dataclasses import
-
-# 修复 dataclasses field 导入
-PositionRecord.__dataclass_fields__["created_at"].default_factory = lambda: datetime.now(timezone.utc)
-if "created_at" not in PositionRecord.__annotations__:
-    PositionRecord.__annotations__["created_at"] = datetime
-
-
-class SqlalchemyTradingStore(TradingStore):
-    """SQLAlchemy 实现的交易数据存储。"""
+class SqlalchemyTradingStore(TradingRepository):
+    """SQLAlchemy 实现的交易数据存储"""
 
     def __init__(self, db_path: str) -> None:
         self.db_url = f"sqlite:///{db_path}"
@@ -175,7 +29,6 @@ class SqlalchemyTradingStore(TradingStore):
 
     def save_position(self, position: PositionRecord) -> None:
         with Session(self.engine) as session:
-            # 查询是否存在
             existing = session.get(PositionModel, position.id)
             if existing:
                 existing.symbol = position.symbol
@@ -221,7 +74,7 @@ class SqlalchemyTradingStore(TradingStore):
                 tag=model.tag,
                 tp_hit=model.tp_hit,
                 created_at=self._str_to_dt(model.created_at),
-                closed_at=self._str_to_dt(model.closed_at),
+                closed_at=self._str_to_dt(model.closed_at) if model.closed_at else None,
             )
 
     def list_positions(
@@ -249,13 +102,14 @@ class SqlalchemyTradingStore(TradingStore):
                     symbol=m.symbol,
                     direction=m.direction,
                     entry_price=m.entry_price,
+                    
                     total_size=m.total_size,
                     status=m.status,
                     exit_price=m.exit_price,
                     tag=m.tag,
                     tp_hit=m.tp_hit,
                     created_at=self._str_to_dt(m.created_at),
-                    closed_at=self._str_to_dt(m.closed_at),
+                    closed_at=self._str_to_dt(m.closed_at) if m.closed_at else None,
                 )
                 for m in models
             ]
@@ -397,32 +251,3 @@ class SqlalchemyTradingStore(TradingStore):
                 )
                 for m in models
             ]
-
-    def get_positions(
-        self,
-        symbol: str | None = None,
-        status: str | None = None,
-        tag: str | None = None,
-    ) -> list[PositionRecord]:
-        """获取持仓列表（别名）。"""
-        return self.list_positions(symbol, status, tag)
-
-    def get_orders_filtered(
-        self,
-        symbol: str | None = None,
-        order_type: str | None = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[OrderRecord]:
-        """获取订单列表（别名）。"""
-        return self.list_orders(symbol, order_type, limit, offset)
-
-    def get_signals_filtered(
-        self,
-        symbol: str | None = None,
-        severity_min: int | None = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[SignalRecord]:
-        """获取信号列表（别名）。"""
-        return self.list_signals(symbol, severity_min, limit, offset)

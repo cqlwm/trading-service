@@ -17,11 +17,7 @@ dependencies = [
 typeCheckingMode = "strict"
 venvPath = "."
 venv = ".venv"
-reportUnknownMemberType = "warning"
-reportUnknownVariableType = "warning"
-reportUntypedClassDecorator = "warning"
-reportUntypedFunctionDecorator = "warning"
-reportUnnecessaryComparison = "warning"
+ignore = ["**/type_wrapper/*_wrapper.py"]
 
 [build-system]
 requires = ["setuptools>=75.0"]

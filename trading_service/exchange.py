@@ -6,11 +6,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from trading_service.store import (
+from trading_service.repository import (
     OrderRecord,
     PositionRecord,
     SignalRecord,
-    TradingStore,
+    TradingRepository,
 )
 from trading_service.types import OrderType, TradeDirection
 
@@ -135,7 +135,7 @@ class Position:
 class MockExchange:
     """模拟交易所 - 核心业务逻辑。"""
 
-    def __init__(self, db: TradingStore) -> None:
+    def __init__(self, db: TradingRepository) -> None:
         self.db = db
 
     def _new_id(self) -> str:

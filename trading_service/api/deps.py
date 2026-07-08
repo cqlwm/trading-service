@@ -6,7 +6,7 @@ from fastapi import Depends
 
 from trading_service.config import settings
 from trading_service.exchange import MockExchange
-from trading_service.store import SqlalchemyTradingStore
+from trading_service.repository import SqlalchemyTradingStore
 from trading_service.strategies.martingale import MartingaleConfig, MartingaleStrategy
 from trading_service.strategies.micro_cap import MicroCapConfig, MicroCapStrategy
 from trading_service.strategies.symbol_picker import StaticListSymbolPicker
