@@ -1,6 +1,8 @@
 """BinanceClient 测试。"""
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 import requests
 
@@ -8,6 +10,12 @@ from trading_service.clients.binance_client import (
     BinanceAlphaToken,
     BinanceAlphaTokenListResponse,
     BinanceClient,
+    BinanceFutureAsset,
+    BinanceFutureExchangeInfo,
+    BinanceFutureRateLimit,
+    BinanceFutureSymbol,
+    BinanceFutureSymbolFilter,
+    BinanceFutureTicker24hr,
     _parse_float,
     _parse_int,
 )
@@ -254,6 +262,221 @@ class TestBinanceAlphaTokenListResponseModel:
         assert len(response.data) == 0
 
 
+class TestBinanceFutureModels:
+    """测试合约相关的 Pydantic 模型。"""
+
+    def test_ticker_24hr_model(self) -> None:
+        """测试 24 小时行情数据模型。"""
+        raw_data = {
+            "symbol": "BTCUSDT",
+            "priceChange": "-94.99999800",
+            "priceChangePercent": "-95.960",
+            "weightedAvgPrice": "0.29628482",
+            "lastPrice": "4.00000200",
+            "lastQty": "200.00000000",
+            "openPrice": "99.00000000",
+            "highPrice": "100.00000000",
+            "lowPrice": "0.10000000",
+            "volume": "8913.30000000",
+            "quoteVolume": "15.30000000",
+            "openTime": 1499783499040,
+            "closeTime": 1499869899040,
+            "firstId": 28385,
+            "lastId": 28460,
+            "count": 76,
+        }
+
+        ticker = BinanceFutureTicker24hr.model_validate(raw_data)
+
+        assert ticker.symbol == "BTCUSDT"
+        assert ticker.price_change_percent_float == -95.96
+        assert ticker.last_price_float == 4.000002
+        assert ticker.volume_float == 8913.3
+        assert ticker.count == 76
+        assert ticker.high_price_float == 100.0
+        assert ticker.low_price_float == 0.1
+
+    def test_exchange_info_asset_model(self) -> None:
+        """测试资产信息模型。"""
+        raw_data = {
+            "asset": "USDT",
+            "marginAvailable": True,
+            "autoAssetExchange": "-10000",
+        }
+
+        asset = BinanceFutureAsset.model_validate(raw_data)
+
+        assert asset.asset == "USDT"
+        assert asset.margin_available is True
+        assert asset.auto_asset_exchange == "-10000"
+
+    def test_exchange_info_rate_limit_model(self) -> None:
+        """测试费率限制模型。"""
+        raw_data = {
+            "interval": "MINUTE",
+            "intervalNum": 1,
+            "limit": 2400,
+            "rateLimitType": "REQUEST_WEIGHT",
+        }
+
+        rate_limit = BinanceFutureRateLimit.model_validate(raw_data)
+
+        assert rate_limit.interval == "MINUTE"
+        assert rate_limit.interval_num == 1
+        assert rate_limit.limit == 2400
+        assert rate_limit.rate_limit_type == "REQUEST_WEIGHT"
+
+    def test_exchange_info_symbol_filter_model(self) -> None:
+        """测试交易对过滤器模型。"""
+        # PRICE_FILTER
+        raw_price = {
+            "filterType": "PRICE_FILTER",
+            "minPrice": "556.80",
+            "maxPrice": "4529764",
+            "tickSize": "0.10",
+        }
+        price_filter = BinanceFutureSymbolFilter.model_validate(raw_price)
+        assert price_filter.filter_type == "PRICE_FILTER"
+        assert price_filter.min_price == "556.80"
+
+        # LOT_SIZE
+        raw_lot = {
+            "filterType": "LOT_SIZE",
+            "minQty": "0.001",
+            "maxQty": "1000",
+            "stepSize": "0.001",
+        }
+        lot_filter = BinanceFutureSymbolFilter.model_validate(raw_lot)
+        assert lot_filter.filter_type == "LOT_SIZE"
+        assert lot_filter.step_size == "0.001"
+
+        # MAX_NUM_ORDERS
+        raw_max = {
+            "filterType": "MAX_NUM_ORDERS",
+            "limit": 200,
+        }
+        max_filter = BinanceFutureSymbolFilter.model_validate(raw_max)
+        assert max_filter.filter_type == "MAX_NUM_ORDERS"
+        assert max_filter.limit == 200
+
+        # MIN_NOTIONAL
+        raw_notional = {
+            "filterType": "MIN_NOTIONAL",
+            "notional": "50",
+        }
+        notional_filter = BinanceFutureSymbolFilter.model_validate(raw_notional)
+        assert notional_filter.filter_type == "MIN_NOTIONAL"
+        assert notional_filter.notional == "50"
+
+    def test_exchange_info_symbol_model(self) -> None:
+        """测试交易对信息模型。"""
+        raw_data = {
+            "symbol": "BTCUSDT",
+            "pair": "BTCUSDT",
+            "contractType": "PERPETUAL",
+            "deliveryDate": 4133404800000,
+            "onboardDate": 1567965300000,
+            "status": "TRADING",
+            "maintMarginPercent": "2.5000",
+            "requiredMarginPercent": "5.0000",
+            "baseAsset": "BTC",
+            "quoteAsset": "USDT",
+            "marginAsset": "USDT",
+            "pricePrecision": 2,
+            "quantityPrecision": 3,
+            "baseAssetPrecision": 8,
+            "quotePrecision": 8,
+            "underlyingType": "COIN",
+            "underlyingSubType": ["PoW"],
+            "triggerProtect": "0.0500",
+            "liquidationFee": "0.012500",
+            "marketTakeBound": "0.05",
+            "maxMoveOrderLimit": 10000,
+            "filters": [
+                {"filterType": "PRICE_FILTER", "minPrice": "556.80"},
+                {"filterType": "LOT_SIZE", "minQty": "0.001"},
+            ],
+            "orderTypes": ["LIMIT", "MARKET"],
+            "timeInForce": ["GTC", "IOC", "FOK"],
+            "permissionSets": ["GRID", "COPY"],
+        }
+
+        symbol = BinanceFutureSymbol.model_validate(raw_data)
+
+        assert symbol.symbol == "BTCUSDT"
+        assert symbol.contract_type == "PERPETUAL"
+        assert symbol.status == "TRADING"
+        assert symbol.price_precision == 2
+        assert symbol.quantity_precision == 3
+        assert symbol.maint_margin_percent == "2.5000"
+        assert len(symbol.filters) == 2
+        assert symbol.order_types == ["LIMIT", "MARKET"]
+        assert symbol.permission_sets == ["GRID", "COPY"]
+
+    def test_exchange_info_full_model(self) -> None:
+        """测试完整的交易所信息模型。"""
+        raw_data = {
+            "exchangeFilters": [""],
+            "rateLimits": [
+                {
+                    "interval": "MINUTE",
+                    "intervalNum": 1,
+                    "limit": 2400,
+                    "rateLimitType": "REQUEST_WEIGHT",
+                }
+            ],
+            "serverTime": 1565613908500,
+            "assets": [
+                {"asset": "BTC", "marginAvailable": True, "autoAssetExchange": "-0.10"}
+            ],
+            "symbols": [
+                {
+                    "symbol": "BTCUSDT",
+                    "pair": "BTCUSDT",
+                    "contractType": "PERPETUAL",
+                    "deliveryDate": 4133404800000,
+                    "onboardDate": 1598252400000,
+                    "status": "TRADING",
+                    "maintMarginPercent": "2.5000",
+                    "requiredMarginPercent": "5.0000",
+                    "baseAsset": "BTC",
+                    "quoteAsset": "USDT",
+                    "marginAsset": "USDT",
+                    "pricePrecision": 2,
+                    "quantityPrecision": 0,
+                    "baseAssetPrecision": 8,
+                    "quotePrecision": 8,
+                    "underlyingType": "COIN",
+                    "underlyingSubType": ["STORAGE"],
+                    "triggerProtect": "0.15",
+                    "liquidationFee": "0.010000",
+                    "marketTakeBound": "0.30",
+                    "filters": [
+                        {
+                            "filterType": "PRICE_FILTER",
+                            "maxPrice": "300",
+                            "minPrice": "0.0001",
+                            "tickSize": "0.0001",
+                        }
+                    ],
+                    "orderTypes": ["LIMIT"],
+                    "timeInForce": ["GTC"],
+                    "permissionSets": [["GRID"]],
+                }
+            ],
+            "timezone": "UTC",
+        }
+
+        info = BinanceFutureExchangeInfo.model_validate(raw_data)
+
+        assert info.timezone == "UTC"
+        assert info.server_time == 1565613908500
+        assert len(info.assets) == 1
+        assert len(info.symbols) == 1
+        assert len(info.rate_limits) == 1
+        assert info.rate_limits[0].limit == 2400
+
+
 class TestBinanceClient:
     """测试 BinanceClient。"""
 
@@ -269,6 +492,16 @@ class TestBinanceClient:
         with BinanceClient() as client:
             assert client is not None
             assert client.session is not None
+
+    def test_future_exchange_lazy_init(self) -> None:
+        """测试合约交易所实例懒加载。"""
+        client = BinanceClient()
+        assert client._future_exchange is None
+        exchange = client.future_exchange
+        assert exchange is not None
+        assert client._future_exchange is not None
+        # 第二次调用应该返回同一个实例
+        assert client.future_exchange is exchange
 
     def test_get_alpha_tokens_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """测试成功获取阿尔法代币列表。"""
@@ -360,34 +593,194 @@ class TestBinanceClient:
         with pytest.raises(requests.ConnectionError, match="Connection failed"):
             client.get_alpha_tokens()
 
+    def test_get_future_exchange_info_mock(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """测试获取交易所信息（mock 版本）。"""
+        client = BinanceClient()
+
+        mock_exchange = MagicMock()
+        mock_exchange.fapiPublicGetExchangeInfo.return_value = {
+            "exchangeFilters": [""],
+            "rateLimits": [
+                {
+                    "interval": "MINUTE",
+                    "intervalNum": 1,
+                    "limit": 2400,
+                    "rateLimitType": "REQUEST_WEIGHT",
+                }
+            ],
+            "serverTime": 1782979200000,
+            "assets": [
+                {"asset": "BTC", "marginAvailable": True, "autoAssetExchange": "-0.10"}
+            ],
+            "symbols": [
+                {
+                    "symbol": "BTCUSDT",
+                    "pair": "BTCUSDT",
+                    "contractType": "PERPETUAL",
+                    "deliveryDate": 4133404800000,
+                    "onboardDate": 1598252400000,
+                    "status": "TRADING",
+                    "maintMarginPercent": "2.5000",
+                    "requiredMarginPercent": "5.0000",
+                    "baseAsset": "BTC",
+                    "quoteAsset": "USDT",
+                    "marginAsset": "USDT",
+                    "pricePrecision": 2,
+                    "quantityPrecision": 0,
+                    "baseAssetPrecision": 8,
+                    "quotePrecision": 8,
+                    "underlyingType": "COIN",
+                    "underlyingSubType": ["STORAGE"],
+                    "triggerProtect": "0.15",
+                    "liquidationFee": "0.010000",
+                    "marketTakeBound": "0.30",
+                    "filters": [
+                        {
+                            "filterType": "PRICE_FILTER",
+                            "maxPrice": "300",
+                            "minPrice": "0.0001",
+                            "tickSize": "0.0001",
+                        }
+                    ],
+                    "orderTypes": ["LIMIT"],
+                    "timeInForce": ["GTC"],
+                    "permissionSets": [["GRID"]],
+                }
+            ],
+            "timezone": "UTC",
+        }
+
+        monkeypatch.setattr(client, "_future_exchange", mock_exchange)
+
+        info = client.get_future_exchange_info()
+
+        assert info.timezone == "UTC"
+        assert info.server_time == 1782979200000
+        assert len(info.assets) == 1
+        assert len(info.symbols) == 1
+        mock_exchange.fapiPublicGetExchangeInfo.assert_called_once()
+
+    def test_get_future_ticker_24hr_all_mock(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """测试获取所有交易对 24 小时行情（mock 版本）。"""
+        client = BinanceClient()
+
+        mock_exchange = MagicMock()
+        mock_exchange.fapiPublicGetTicker24hr.return_value = [
+            {
+                "symbol": "BTCUSDT",
+                "priceChange": "-1176.70",
+                "priceChangePercent": "-1.860",
+                "weightedAvgPrice": "63104.64",
+                "lastPrice": "62084.50",
+                "lastQty": "0.016",
+                "openPrice": "63261.20",
+                "highPrice": "64234.10",
+                "lowPrice": "61708.20",
+                "volume": "195371.752",
+                "quoteVolume": "12328863584.19",
+                "openTime": 1783417680000,
+                "closeTime": 1783504091808,
+                "firstId": 7876382803,
+                "lastId": 7880970214,
+                "count": 4580865,
+            },
+            {
+                "symbol": "ETHUSDT",
+                "priceChange": "-50.0",
+                "priceChangePercent": "-2.5",
+                "weightedAvgPrice": "2000.0",
+                "lastPrice": "1950.0",
+                "lastQty": "1.0",
+                "openPrice": "2000.0",
+                "highPrice": "2050.0",
+                "lowPrice": "1900.0",
+                "volume": "100000",
+                "quoteVolume": "200000000",
+                "openTime": 1783417680000,
+                "closeTime": 1783504091808,
+                "firstId": 123,
+                "lastId": 456,
+                "count": 789,
+            },
+        ]
+
+        monkeypatch.setattr(client, "_future_exchange", mock_exchange)
+
+        tickers = client.get_future_ticker_24hr()
+
+        assert len(tickers) == 2
+        assert tickers[0].symbol == "BTCUSDT"
+        assert tickers[1].symbol == "ETHUSDT"
+        assert tickers[0].price_change_percent_float == -1.860
+        assert tickers[0].last_price_float == 62084.50
+        assert tickers[0].count == 4580865
+
+    def test_get_future_ticker_24hr_single_mock(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """测试获取单个交易对 24 小时行情（mock 版本）。"""
+        client = BinanceClient()
+
+        mock_exchange = MagicMock()
+        mock_exchange.fapiPublicGetTicker24hr.return_value = {
+            "symbol": "BTCUSDT",
+            "priceChange": "-1176.70",
+            "priceChangePercent": "-1.860",
+            "weightedAvgPrice": "63104.64",
+            "lastPrice": "62084.50",
+            "lastQty": "0.016",
+            "openPrice": "63261.20",
+            "highPrice": "64234.10",
+            "lowPrice": "61708.20",
+            "volume": "195371.752",
+            "quoteVolume": "12328863584.19",
+            "openTime": 1783417680000,
+            "closeTime": 1783504091808,
+            "firstId": 7876382803,
+            "lastId": 7880970214,
+            "count": 4580865,
+        }
+
+        monkeypatch.setattr(client, "_future_exchange", mock_exchange)
+
+        tickers = client.get_future_ticker_24hr(symbol="BTCUSDT")
+
+        assert len(tickers) == 1
+        assert tickers[0].symbol == "BTCUSDT"
+        assert tickers[0].last_price_float == 62084.50
+        mock_exchange.fapiPublicGetTicker24hr.assert_called_once_with({"symbol": "BTCUSDT"})
+
     def test_close_session(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """测试关闭会话。"""
         close_called = False
 
-        def mock_close(self) -> None:
+        def mock_close(self) -> None:  # noqa: ANN001
             nonlocal close_called
             close_called = True
 
         monkeypatch.setattr(requests.Session, "close", mock_close)
 
         client = BinanceClient()
+        # 先初始化 ccxt 实例
+        _ = client.future_exchange
+        # mock ccxt 的 close 方法
+        mock_ccxt_close = MagicMock()
+        monkeypatch.setattr(client._future_exchange, "close", mock_ccxt_close)
+
         client.close()
 
         assert close_called is True
-
-
+        assert mock_ccxt_close.call_count == 1
 
 
 class TestBinanceClientIntegration:
     """集成测试（可选运行）。
 
     这些测试会真实调用外部 API，默认跳过。
-    如需运行: pytest tests/test_binance_client.py -m integration
+    如需运行: pytest tests/test_binance_client.py -v --run-integration
     """
 
     @pytest.mark.integration
-    def test_real_api_call(self) -> None:
-        """真实调用币安 API 测试。"""
+    def test_real_alpha_tokens_api(self) -> None:
+        """真实调用币安阿尔法代币 API。"""
         with BinanceClient(timeout=30) as client:
             tokens = client.get_alpha_tokens()
 
@@ -399,4 +792,55 @@ class TestBinanceClientIntegration:
             has_market_cap = any(t.market_cap and t.market_cap > 0 for t in tokens)
             assert has_market_cap, "至少应该有一个代币有市值数据"
 
-            print(f"\n✅ 真实 API 测试通过，获取到 {len(tokens)} 个代币")
+            print(f"\n✅ 获取到 {len(tokens)} 个阿尔法代币")
+
+    @pytest.mark.integration
+    def test_real_future_exchange_info(self) -> None:
+        """真实调用币安合约交易所信息 API。"""
+        with BinanceClient(timeout=30) as client:
+            info = client.get_future_exchange_info()
+
+            assert info.timezone == "UTC"
+            assert info.server_time > 0
+            assert len(info.symbols) > 0
+            assert len(info.assets) > 0
+            assert len(info.rate_limits) > 0
+
+            # 验证 BTCUSDT 交易对数据
+            btc = [s for s in info.symbols if s.symbol == "BTCUSDT"][0]
+            assert btc.status == "TRADING"
+            assert btc.contract_type == "PERPETUAL"
+            assert btc.price_precision >= 0
+            assert btc.quantity_precision >= 0
+
+            print(f"\n✅ 交易所信息: {len(info.symbols)} 个交易对, {len(info.assets)} 个资产")
+
+    @pytest.mark.integration
+    def test_real_future_ticker_24hr(self) -> None:
+        """真实调用币安合约 24 小时行情 API。"""
+        with BinanceClient(timeout=30) as client:
+            # 获取所有交易对行情
+            all_tickers = client.get_future_ticker_24hr()
+            assert len(all_tickers) > 0
+
+            # 获取单个交易对行情
+            btc_tickers = client.get_future_ticker_24hr(symbol="BTCUSDT")
+            assert len(btc_tickers) == 1
+            btc = btc_tickers[0]
+            assert btc.symbol == "BTCUSDT"
+            assert btc.last_price_float > 0
+            assert btc.count > 0
+
+            # 验证数值属性
+            assert isinstance(btc.price_change_percent_float, float)
+            assert isinstance(btc.volume_float, float)
+            assert isinstance(btc.quote_volume_float, float)
+            assert isinstance(btc.high_price_float, float)
+            assert isinstance(btc.low_price_float, float)
+
+            print(f"\n✅ 获取到 {len(all_tickers)} 个交易对的行情数据")
+            print(f"   BTCUSDT 价格: {btc.last_price} USDT")
+            print(f"   BTCUSDT 24h 涨跌: {btc.price_change_percent}%")
+            print(f"   BTCUSDT 24h 成交量: {btc.volume} BTC")
+            print(f"   BTCUSDT 24h 成交额: {btc.quote_volume} USDT")
+            print(f"   BTCUSDT 24h 成交笔数: {btc.count:,}")

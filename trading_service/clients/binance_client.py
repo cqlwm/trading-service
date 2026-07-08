@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import ccxt
 import requests
 from pydantic import BaseModel, Field, field_validator
 
@@ -125,10 +126,162 @@ class BinanceAlphaTokenListResponse(BaseModel):
     success: bool
 
 
+class BinanceFutureAsset(BaseModel):
+    """合约资产信息。"""
+
+    asset: str
+    margin_available: bool = Field(alias="marginAvailable")
+    auto_asset_exchange: str = Field(alias="autoAssetExchange")
+
+
+class BinanceFutureSymbolFilter(BaseModel):
+    """合约交易对过滤器。"""
+
+    filter_type: str = Field(alias="filterType")
+    # PRICE_FILTER 相关字段
+    min_price: str | None = Field(alias="minPrice", default=None)
+    max_price: str | None = Field(alias="maxPrice", default=None)
+    tick_size: str | None = Field(alias="tickSize", default=None)
+    # LOT_SIZE / MARKET_LOT_SIZE 相关字段
+    min_qty: str | None = Field(alias="minQty", default=None)
+    max_qty: str | None = Field(alias="maxQty", default=None)
+    step_size: str | None = Field(alias="stepSize", default=None)
+    # MAX_NUM_ORDERS 相关字段
+    limit: int | None = None
+    # MIN_NOTIONAL 相关字段
+    notional: str | None = None
+
+
+class BinanceFutureSymbol(BaseModel):
+    """合约交易对信息。"""
+
+    symbol: str
+    pair: str
+    contract_type: str = Field(alias="contractType")
+    delivery_date: int = Field(alias="deliveryDate")
+    onboard_date: int = Field(alias="onboardDate")
+    status: str
+    maint_margin_percent: str = Field(alias="maintMarginPercent")
+    required_margin_percent: str = Field(alias="requiredMarginPercent")
+    base_asset: str = Field(alias="baseAsset")
+    quote_asset: str = Field(alias="quoteAsset")
+    margin_asset: str = Field(alias="marginAsset")
+    price_precision: int = Field(alias="pricePrecision")
+    quantity_precision: int = Field(alias="quantityPrecision")
+    base_asset_precision: int = Field(alias="baseAssetPrecision")
+    quote_precision: int = Field(alias="quotePrecision")
+    underlying_type: str = Field(alias="underlyingType")
+    underlying_sub_type: list[str] = Field(alias="underlyingSubType")
+    trigger_protect: str = Field(alias="triggerProtect")
+    liquidation_fee: str = Field(alias="liquidationFee")
+    market_take_bound: str = Field(alias="marketTakeBound")
+    max_move_order_limit: int | None = Field(alias="maxMoveOrderLimit", default=None)
+    filters: list[BinanceFutureSymbolFilter]
+    order_types: list[str] = Field(alias="orderTypes")
+    time_in_force: list[str] = Field(alias="timeInForce")
+    permission_sets: list[list[str]] | list[str] | None = Field(
+        alias="permissionSets",
+        default=None,
+    )
+
+
+class BinanceFutureRateLimit(BaseModel):
+    """费率限制。"""
+
+    interval: str
+    interval_num: int = Field(alias="intervalNum")
+    limit: int
+    rate_limit_type: str = Field(alias="rateLimitType")
+
+
+class BinanceFutureExchangeInfo(BaseModel):
+    """币安合约交易所信息。"""
+
+    exchange_filters: list[str] = Field(alias="exchangeFilters")
+    rate_limits: list[BinanceFutureRateLimit] = Field(alias="rateLimits")
+    server_time: int = Field(alias="serverTime")
+    assets: list[BinanceFutureAsset]
+    symbols: list[BinanceFutureSymbol]
+    timezone: str
+
+
+class BinanceFutureTicker24hr(BaseModel):
+    """币安合约 24 小时行情数据。"""
+
+    symbol: str
+    price_change: str = Field(alias="priceChange")
+    price_change_percent: str = Field(alias="priceChangePercent")
+    weighted_avg_price: str = Field(alias="weightedAvgPrice")
+    last_price: str = Field(alias="lastPrice")
+    last_qty: str = Field(alias="lastQty")
+    open_price: str = Field(alias="openPrice")
+    high_price: str = Field(alias="highPrice")
+    low_price: str = Field(alias="lowPrice")
+    volume: str
+    quote_volume: str = Field(alias="quoteVolume")
+    open_time: int = Field(alias="openTime")
+    close_time: int = Field(alias="closeTime")
+    first_id: int = Field(alias="firstId")
+    last_id: int = Field(alias="lastId")
+    count: int
+
+    @property
+    def price_change_float(self) -> float:
+        """价格变动（数值型）。"""
+        return float(self.price_change)
+
+    @property
+    def price_change_percent_float(self) -> float:
+        """价格变动百分比（数值型）。"""
+        return float(self.price_change_percent)
+
+    @property
+    def last_price_float(self) -> float:
+        """最新价格（数值型）。"""
+        return float(self.last_price)
+
+    @property
+    def volume_float(self) -> float:
+        """成交量（基础货币，数值型）。"""
+        return float(self.volume)
+
+    @property
+    def quote_volume_float(self) -> float:
+        """成交额（计价货币，数值型）。"""
+        return float(self.quote_volume)
+
+    @property
+    def high_price_float(self) -> float:
+        """最高价（数值型）。"""
+        return float(self.high_price)
+
+    @property
+    def low_price_float(self) -> float:
+        """最低价（数值型）。"""
+        return float(self.low_price)
+
+    @property
+    def open_price_float(self) -> float:
+        """开盘价（数值型）。"""
+        return float(self.open_price)
+
+    @property
+    def last_qty_float(self) -> float:
+        """最新成交量（数值型）。"""
+        return float(self.last_qty)
+
+    @property
+    def weighted_avg_price_float(self) -> float:
+        """加权平均价（数值型）。"""
+        return float(self.weighted_avg_price)
+
+
 class BinanceClient:
     """币安 API 客户端。
 
-    封装币安 BAPI 接口，用于获取阿尔法代币列表等数据。
+    封装币安各类 API 接口：
+    - 阿尔法代币列表（公开 API）
+    - 合约市场数据（使用 ccxt）
     """
 
     BASE_URL = "https://www.binance.com/bapi"
@@ -136,6 +289,21 @@ class BinanceClient:
     def __init__(self, timeout: int = 10) -> None:
         self.timeout = timeout
         self.session = requests.Session()
+        # 初始化币安合约交易所实例 (U本位永续合约)
+        self._future_exchange: ccxt.binance = ccxt.binance(
+            {
+                "enableRateLimit": True,
+                "timeout": self.timeout * 1000,
+                "options": {
+                    "defaultType": "future",  # 永续合约
+                },
+            }
+        )
+
+    @property
+    def future_exchange(self) -> ccxt.binance:
+        """获取币安合约交易所实例。"""
+        return self._future_exchange
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """发送 GET 请求。"""
@@ -168,9 +336,40 @@ class BinanceClient:
         logger.info(f"Fetched {len(response.data)} alpha tokens from Binance")
         return response.data
 
+    def get_future_exchange_info(self) -> BinanceFutureExchangeInfo:
+        """获取币安合约交易所信息。
+
+        包含所有交易对配置、费率限制、资产信息等。
+
+        Returns:
+            BinanceFutureExchangeInfo: 交易所信息
+        """
+        raw_data = self.future_exchange.fapiPublicGetExchangeInfo()
+        return BinanceFutureExchangeInfo.model_validate(raw_data)
+
+    def get_future_ticker_24hr(self, symbol: str | None = None) -> list[BinanceFutureTicker24hr]:
+        """获取币安合约 24 小时行情数据。
+
+        Args:
+            symbol: 交易对符号（如 "BTCUSDT"）。不传则返回所有交易对。
+
+        Returns:
+            list[BinanceFutureTicker24hr]: 24小时行情数据列表
+        """
+        if symbol:
+            # 单个交易对 - 直接调用原生 API 返回的就是字典
+            raw_data = self.future_exchange.fapiPublicGetTicker24hr({"symbol": symbol})
+            return [BinanceFutureTicker24hr.model_validate(raw_data)]
+        else:
+            # 所有交易对 - 原生 API 返回数组
+            raw_data_list = self.future_exchange.fapiPublicGetTicker24hr()
+            return [BinanceFutureTicker24hr.model_validate(item) for item in raw_data_list]
+
     def close(self) -> None:
         """关闭会话。"""
         self.session.close()
+        if self._future_exchange:
+            self._future_exchange.close()
 
     def __enter__(self) -> "BinanceClient":
         return self
