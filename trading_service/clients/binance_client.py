@@ -205,6 +205,99 @@ class BinanceFutureExchangeInfo(BaseModel):
     timezone: str
 
 
+
+
+class BinanceFutureKline(BaseModel):
+    """币安合约 K 线数据。"""
+
+    open_time: int
+    open_price: str
+    high_price: str
+    low_price: str
+    close_price: str
+    volume: str
+    close_time: int
+    quote_volume: str
+    trade_count: int
+    taker_buy_base_volume: str
+    taker_buy_quote_volume: str
+    ignore: str
+
+    @classmethod
+    def from_list(cls, kline_data: list) -> "BinanceFutureKline":
+        """从币安 API 返回的数组创建 K 线实例。
+
+        Args:
+            kline_data: [open_time, open, high, low, close, volume, close_time,
+                         quote_volume, trade_count, taker_buy_base, taker_buy_quote, ignore]
+
+        Returns:
+            BinanceFutureKline: K 线数据实例
+        """
+        return cls(
+            open_time=kline_data[0],
+            open_price=kline_data[1],
+            high_price=kline_data[2],
+            low_price=kline_data[3],
+            close_price=kline_data[4],
+            volume=kline_data[5],
+            close_time=kline_data[6],
+            quote_volume=kline_data[7],
+            trade_count=kline_data[8],
+            taker_buy_base_volume=kline_data[9],
+            taker_buy_quote_volume=kline_data[10],
+            ignore=kline_data[11],
+        )
+
+    @property
+    def open_price_float(self) -> float:
+        """开盘价（数值型）。"""
+        return float(self.open_price)
+
+    @property
+    def high_price_float(self) -> float:
+        """最高价（数值型）。"""
+        return float(self.high_price)
+
+    @property
+    def low_price_float(self) -> float:
+        """最低价（数值型）。"""
+        return float(self.low_price)
+
+    @property
+    def close_price_float(self) -> float:
+        """收盘价（数值型）。"""
+        return float(self.close_price)
+
+    @property
+    def volume_float(self) -> float:
+        """成交量（基础货币，数值型）。"""
+        return float(self.volume)
+
+    @property
+    def quote_volume_float(self) -> float:
+        """成交额（计价货币，数值型）。"""
+        return float(self.quote_volume)
+
+    @property
+    def taker_buy_base_volume_float(self) -> float:
+        """主动买入量（基础货币，数值型）。"""
+        return float(self.taker_buy_base_volume)
+
+    @property
+    def taker_buy_quote_volume_float(self) -> float:
+        """主动买入额（计价货币，数值型）。"""
+        return float(self.taker_buy_quote_volume)
+
+    @property
+    def is_up(self) -> bool:
+        """是否上涨（收盘价 >= 开盘价）。"""
+        return self.close_price_float >= self.open_price_float
+
+    @property
+    def is_down(self) -> bool:
+        """是否下跌（收盘价 < 开盘价）。"""
+        return self.close_price_float < self.open_price_float
 class BinanceFutureTicker24hr(BaseModel):
     """币安合约 24 小时行情数据。"""
 
@@ -364,6 +457,43 @@ class BinanceClient:
             # 所有交易对 - 原生 API 返回数组
             raw_data_list = self.future_exchange.fapiPublicGetTicker24hr()
             return [BinanceFutureTicker24hr.model_validate(item) for item in raw_data_list]
+
+
+    def get_future_klines(
+        self,
+        symbol: str,
+        interval: str,
+        limit: int = 500,
+        start_time: int | None = None,
+        end_time: int | None = None,
+    ) -> list[BinanceFutureKline]:
+        """获取币安合约 K 线数据。
+
+        Args:
+            symbol: 交易对符号（如 "BTCUSDT"）
+            interval: K线时间周期，可选值:
+                分钟: 1m, 3m, 5m, 15m, 30m
+                小时: 1h, 2h, 4h, 6h, 8h, 12h
+                日/周/月: 1d, 3d, 1w, 1M
+            limit: 获取的 K 线数量，默认 500，最大 1500
+            start_time: 起始时间戳（毫秒），可选
+            end_time: 结束时间戳（毫秒），可选
+
+        Returns:
+            list[BinanceFutureKline]: K 线数据列表，按时间升序排列
+        """
+        params: dict[str, Any] = {
+            "symbol": symbol,
+            "interval": interval,
+            "limit": limit,
+        }
+        if start_time is not None:
+            params["startTime"] = start_time
+        if end_time is not None:
+            params["endTime"] = end_time
+
+        raw_data = self.future_exchange.fapiPublicGetKlines(params)
+        return [BinanceFutureKline.from_list(kline) for kline in raw_data]
 
     def close(self) -> None:
         """关闭会话。"""

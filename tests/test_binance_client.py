@@ -15,6 +15,7 @@ from trading_service.clients.binance_client import (
     BinanceFutureRateLimit,
     BinanceFutureSymbol,
     BinanceFutureSymbolFilter,
+    BinanceFutureKline,
     BinanceFutureTicker24hr,
     _parse_float,
     _parse_int,
@@ -477,6 +478,95 @@ class TestBinanceFutureModels:
         assert info.rate_limits[0].limit == 2400
 
 
+    def test_kline_model_from_list(self) -> None:
+        """测试 K 线模型从数组创建。"""
+        raw_kline = [
+            1499783499040,  # open_time
+            "99.00000000",  # open
+            "100.00000000",  # high
+            "0.10000000",  # low
+            "4.00000200",  # close
+            "8913.30000000",  # volume
+            1499869899040,  # close_time
+            "15.30000000",  # quote_volume
+            76,  # trade_count
+            "4500.12345678",  # taker_buy_base
+            "50000.12345678",  # taker_buy_quote
+            "0",  # ignore
+        ]
+
+        kline = BinanceFutureKline.from_list(raw_kline)
+
+        assert kline.open_time == 1499783499040
+        assert kline.open_price == "99.00000000"
+        assert kline.high_price == "100.00000000"
+        assert kline.low_price == "0.10000000"
+        assert kline.close_price == "4.00000200"
+        assert kline.volume == "8913.30000000"
+        assert kline.close_time == 1499869899040
+        assert kline.quote_volume == "15.30000000"
+        assert kline.trade_count == 76
+        assert kline.taker_buy_base_volume == "4500.12345678"
+        assert kline.taker_buy_quote_volume == "50000.12345678"
+        assert kline.ignore == "0"
+
+    def test_kline_model_float_properties(self) -> None:
+        """测试 K 线模型的数值型属性。"""
+        raw_kline = [
+            1499783499040,
+            "62000.50",
+            "62500.00",
+            "61800.25",
+            "62350.75",
+            "1000.5",
+            1499869899040,
+            "62500000.0",
+            50000,
+            "500.25",
+            "31250000.0",
+            "0",
+        ]
+
+        kline = BinanceFutureKline.from_list(raw_kline)
+
+        assert kline.open_price_float == 62000.50
+        assert kline.high_price_float == 62500.00
+        assert kline.low_price_float == 61800.25
+        assert kline.close_price_float == 62350.75
+        assert kline.volume_float == 1000.5
+        assert kline.quote_volume_float == 62500000.0
+        assert kline.taker_buy_base_volume_float == 500.25
+        assert kline.taker_buy_quote_volume_float == 31250000.0
+
+    def test_kline_model_is_up_down(self) -> None:
+        """测试 K 线涨跌判断。"""
+        # 阳线（收盘价 >= 开盘价）
+        bull_kline = [
+            1499783499040, "100.0", "105.0", "95.0", "102.0",
+            "1000", 1499869899040, "100000", 100, "500", "50000", "0"
+        ]
+        kline1 = BinanceFutureKline.from_list(bull_kline)
+        assert kline1.is_up is True
+        assert kline1.is_down is False
+
+        # 阴线（收盘价 < 开盘价）
+        bear_kline = [
+            1499783499040, "100.0", "105.0", "95.0", "98.0",
+            "1000", 1499869899040, "100000", 100, "500", "50000", "0"
+        ]
+        kline2 = BinanceFutureKline.from_list(bear_kline)
+        assert kline2.is_up is False
+        assert kline2.is_down is True
+
+        # 十字星（收盘价 == 开盘价）
+        doji_kline = [
+            1499783499040, "100.0", "105.0", "95.0", "100.0",
+            "1000", 1499869899040, "100000", 100, "500", "50000", "0"
+        ]
+        kline3 = BinanceFutureKline.from_list(doji_kline)
+        assert kline3.is_up is True  # 平盘算上涨
+        assert kline3.is_down is False
+
 class TestBinanceClient:
     """测试 BinanceClient。"""
 
@@ -748,6 +838,73 @@ class TestBinanceClient:
         assert tickers[0].last_price_float == 62084.50
         mock_exchange.fapiPublicGetTicker24hr.assert_called_once_with({"symbol": "BTCUSDT"})
 
+
+    def test_get_future_klines_mock(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """测试获取 K 线数据（mock 版本）。"""
+        client = BinanceClient()
+
+        mock_exchange = MagicMock()
+        mock_exchange.fapiPublicGetKlines.return_value = [
+            [
+                1499783499040, "62000.00", "62500.00", "61500.00", "62250.00",
+                "1000.5", 1499869899040, "62500000.0", 50000, "500.25", "31250000.0", "0"
+            ],
+            [
+                1499869899040, "62250.00", "63000.00", "62000.00", "62800.00",
+                "800.25", 1499956299040, "50250000.0", 30000, "400.5", "25125000.0", "0"
+            ],
+        ]
+
+        monkeypatch.setattr(client, "_future_exchange", mock_exchange)
+
+        klines = client.get_future_klines(
+            symbol="BTCUSDT",
+            interval="1h",
+            limit=2,
+        )
+
+        assert len(klines) == 2
+        assert klines[0].open_price == "62000.00"
+        assert klines[0].close_price_float == 62250.00
+        assert klines[0].volume_float == 1000.5
+        assert klines[0].trade_count == 50000
+        assert klines[1].high_price_float == 63000.00
+
+        # 验证调用参数
+        mock_exchange.fapiPublicGetKlines.assert_called_once_with({
+            "symbol": "BTCUSDT",
+            "interval": "1h",
+            "limit": 2,
+        })
+
+    def test_get_future_klines_with_time_range_mock(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """测试获取带时间范围的 K 线（mock 版本）。"""
+        client = BinanceClient()
+
+        mock_exchange = MagicMock()
+        mock_exchange.fapiPublicGetKlines.return_value = []
+
+        monkeypatch.setattr(client, "_future_exchange", mock_exchange)
+
+        start_ts = 1499783499040
+        end_ts = 1499869899040
+
+        client.get_future_klines(
+            symbol="BTCUSDT",
+            interval="15m",
+            limit=100,
+            start_time=start_ts,
+            end_time=end_ts,
+        )
+
+        mock_exchange.fapiPublicGetKlines.assert_called_once_with({
+            "symbol": "BTCUSDT",
+            "interval": "15m",
+            "limit": 100,
+            "startTime": start_ts,
+            "endTime": end_ts,
+        })
+
     def test_close_session(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """测试关闭会话。"""
         close_called = False
@@ -844,3 +1001,40 @@ class TestBinanceClientIntegration:
             print(f"   BTCUSDT 24h 成交量: {btc.volume} BTC")
             print(f"   BTCUSDT 24h 成交额: {btc.quote_volume} USDT")
             print(f"   BTCUSDT 24h 成交笔数: {btc.count:,}")
+
+    @pytest.mark.integration
+    def test_real_future_klines(self) -> None:
+        """真实调用币安合约 K 线 API。"""
+        with BinanceClient(timeout=30) as client:
+            # 获取不同时间周期的 K 线
+            klines_1h = client.get_future_klines(
+                symbol="BTCUSDT",
+                interval="1h",
+                limit=10,
+            )
+            assert len(klines_1h) == 10
+            
+            klines_15m = client.get_future_klines(
+                symbol="BTCUSDT",
+                interval="15m",
+                limit=5,
+            )
+            assert len(klines_15m) == 5
+
+            # 验证 K 线数据
+            kline = klines_1h[0]
+            assert kline.open_time > 0
+            assert kline.close_time > kline.open_time
+            assert kline.high_price_float >= kline.low_price_float
+            assert kline.volume_float >= 0
+            assert kline.trade_count >= 0
+
+            # 验证涨跌判断逻辑正常
+            assert isinstance(kline.is_up, bool)
+            assert isinstance(kline.is_down, bool)
+
+            print(f"\n✅ K 线数据验证通过")
+            print(f"   1小时 K 线: {len(klines_1h)} 根")
+            print(f"   15分钟 K 线: {len(klines_15m)} 根")
+            print(f"   BTC 最新价: {kline.close_price} USDT")
+            print(f"   K线状态: {'📈 上涨' if kline.is_up else '📉 下跌'}")
