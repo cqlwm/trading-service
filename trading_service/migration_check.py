@@ -34,7 +34,7 @@ def check_migrations(db_path: str) -> tuple[bool, str | None, str | None]:
     head_rev = get_head_revision()
 
     # 如果数据库是全新的（current_rev 是 None），也需要迁移
-    return (current_rev == head_rev, current_rev or "None", head_rev)
+    return current_rev == head_rev, current_rev or "None", head_rev
 
 
 def run_migrations(db_path: str) -> None:
