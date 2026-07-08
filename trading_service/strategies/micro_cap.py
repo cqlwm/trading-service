@@ -3,7 +3,7 @@ from typing import Any
 
 from trading_service.exchange import MockExchange
 from trading_service.strategies.base import Strategy, StrategyConfig
-from trading_service.strategies.symbol_picker import ISymbolPicker, SymbolInfo
+from trading_service.pickers import ISymbolPicker, SymbolInfo
 
 
 class MicroCapConfig(StrategyConfig):

@@ -3,7 +3,7 @@ from typing import Any
 
 from trading_service.exchange import MockExchange, Position
 from trading_service.strategies.base import Strategy, StrategyConfig
-from trading_service.strategies.symbol_picker import ISymbolPicker
+from trading_service.pickers import ISymbolPicker
 from trading_service.types import TradeDirection, OrderType
 
 

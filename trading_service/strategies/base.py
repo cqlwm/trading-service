@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from trading_service.exchange import MockExchange
-from trading_service.strategies.symbol_picker import ISymbolPicker
+from trading_service.pickers import ISymbolPicker
 
 
 @dataclass

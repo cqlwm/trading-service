@@ -34,8 +34,6 @@ def _parse_int(value: Any) -> int | None:
         return int(float(str(value)))
     except (ValueError, TypeError):
         return None
-
-
 class BinanceAlphaToken(BaseModel):
     """币安阿尔法代币信息。"""
 
@@ -87,7 +85,7 @@ class BinanceAlphaToken(BaseModel):
         mode="before",
     )
     @classmethod
-    def parse_float_fields(cls, v: Any) -> float | None:
+    def parse_float_fields(cls, v: object) -> float | None:
         return _parse_float(v)
 
     @field_validator(
@@ -102,7 +100,7 @@ class BinanceAlphaToken(BaseModel):
         mode="before",
     )
     @classmethod
-    def parse_int_fields(cls, v: Any) -> int | None:
+    def parse_int_fields(cls, v: object) -> int | None:
         return _parse_int(v)
 
     @field_validator("chain_id", mode="before")
@@ -138,17 +136,13 @@ class BinanceFutureSymbolFilter(BaseModel):
     """合约交易对过滤器。"""
 
     filter_type: str = Field(alias="filterType")
-    # PRICE_FILTER 相关字段
     min_price: str | None = Field(alias="minPrice", default=None)
     max_price: str | None = Field(alias="maxPrice", default=None)
     tick_size: str | None = Field(alias="tickSize", default=None)
-    # LOT_SIZE / MARKET_LOT_SIZE 相关字段
     min_qty: str | None = Field(alias="minQty", default=None)
     max_qty: str | None = Field(alias="maxQty", default=None)
     step_size: str | None = Field(alias="stepSize", default=None)
-    # MAX_NUM_ORDERS 相关字段
     limit: int | None = None
-    # MIN_NOTIONAL 相关字段
     notional: str | None = None
 
 
@@ -203,8 +197,6 @@ class BinanceFutureExchangeInfo(BaseModel):
     assets: list[BinanceFutureAsset]
     symbols: list[BinanceFutureSymbol]
     timezone: str
-
-
 
 
 class BinanceFutureKline(BaseModel):
@@ -298,6 +290,23 @@ class BinanceFutureKline(BaseModel):
     def is_down(self) -> bool:
         """是否下跌（收盘价 < 开盘价）。"""
         return self.close_price_float < self.open_price_float
+
+    @property
+    def price_change_percent_float(self) -> float:
+        """涨跌幅百分比。
+
+        Returns:
+            float: 涨跌幅百分比，正数为涨，负数为跌
+        """
+        if self.open_price_float == 0:
+            return 0.0
+        return (
+            (self.close_price_float - self.open_price_float)
+            / self.open_price_float
+            * 100
+        )
+
+
 class BinanceFutureTicker24hr(BaseModel):
     """币安合约 24 小时行情数据。"""
 
@@ -382,23 +391,24 @@ class BinanceClient:
     def __init__(self, timeout: int = 10) -> None:
         self.timeout = timeout
         self.session = requests.Session()
-        # 初始化币安合约交易所实例 (U本位永续合约)
-        self._future_exchange: ccxt.binance = ccxt.binance(
-            {
-                "enableRateLimit": True,
-                "timeout": self.timeout * 1000,
-                "options": {
-                    "defaultType": "future",  # 永续合约
-                },
-            }
-        )
+        self._future_exchange: ccxt.binance | None = None
 
     @property
     def future_exchange(self) -> ccxt.binance:
-        """获取币安合约交易所实例。"""
+        """获取币安合约交易所实例（懒加载）。"""
+        if self._future_exchange is None:
+            self._future_exchange = ccxt.binance(
+                {
+                    "enableRateLimit": True,
+                    "timeout": self.timeout * 1000,
+                    "options": {
+                        "defaultType": "future",
+                    },
+                }
+            )
         return self._future_exchange
 
-    def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _get(self, path: str, params: dict | None = None) -> dict:
         """发送 GET 请求。"""
         url = f"{self.BASE_URL}{path}"
         logger.debug(f"GET {url} params={params}")
@@ -450,14 +460,11 @@ class BinanceClient:
             list[BinanceFutureTicker24hr]: 24小时行情数据列表
         """
         if symbol:
-            # 单个交易对 - 直接调用原生 API 返回的就是字典
             raw_data = self.future_exchange.fapiPublicGetTicker24hr({"symbol": symbol})
             return [BinanceFutureTicker24hr.model_validate(raw_data)]
         else:
-            # 所有交易对 - 原生 API 返回数组
             raw_data_list = self.future_exchange.fapiPublicGetTicker24hr()
             return [BinanceFutureTicker24hr.model_validate(item) for item in raw_data_list]
-
 
     def get_future_klines(
         self,
@@ -471,7 +478,7 @@ class BinanceClient:
 
         Args:
             symbol: 交易对符号（如 "BTCUSDT"）
-            interval: K线时间周期，可选值:
+            interval: K 线时间周期，可选值:
                 分钟: 1m, 3m, 5m, 15m, 30m
                 小时: 1h, 2h, 4h, 6h, 8h, 12h
                 日/周/月: 1d, 3d, 1w, 1M
@@ -482,7 +489,7 @@ class BinanceClient:
         Returns:
             list[BinanceFutureKline]: K 线数据列表，按时间升序排列
         """
-        params: dict[str, Any] = {
+        params: dict[str, object] = {
             "symbol": symbol,
             "interval": interval,
             "limit": limit,
@@ -504,5 +511,5 @@ class BinanceClient:
     def __enter__(self) -> "BinanceClient":
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(self, exc_type: type | None, exc_val: Exception | None, exc_tb: object | None) -> None:
         self.close()
