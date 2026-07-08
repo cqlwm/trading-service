@@ -99,6 +99,79 @@ classDiagram
 
 ---
 
+## 2. Repository 模式与数据访问层
+
+### 2.1 架构设计
+
+采用**依赖倒置原则 (DIP)** 设计数据访问层：
+
+```
+业务逻辑层 (MockExchange)
+    ↓ 依赖抽象
+TradingRepository (ABC 抽象接口)
+    ↓ 具体实现
+SqlalchemyTradingStore (SQLAlchemy ORM)
+    ↓ ORM 映射
+SQLite Database
+```
+
+### 2.2 模块结构
+
+```
+repository/
+├── __init__.py              # 对外统一导出
+├── abc.py                   # 抽象接口定义
+│   ├── PositionRecord       # 持仓数据类
+│   ├── OrderRecord          # 订单数据类
+│   ├── SignalRecord         # 信号数据类
+│   └── TradingRepository    # Repository 抽象基类
+│
+├── sqlalchemy_impl.py       # SQLAlchemy ORM 实现
+│   └── SqlalchemyTradingStore
+│
+└── models/                  # ORM 模型层
+    ├── base.py              # Declarative Base
+    ├── position.py          # PositionModel
+    ├── order.py             # OrderModel
+    └── signal.py            # SignalModel
+```
+
+### 2.3 数据库 Schema 版本管理
+
+使用 **Alembic** 进行数据库迁移和版本管理：
+
+**工作流程**：
+1. 开发人员修改 `repository/models/` 中的 ORM 模型
+2. 运行 `alembic revision --autogenerate -m "描述"` 自动生成迁移脚本
+3. 检查并调整生成的迁移脚本（`migrations/versions/`）
+4. 应用启动时自动检测并执行未完成的迁移
+
+**迁移命令**：
+```bash
+# 生成迁移脚本
+alembic revision --autogenerate -m "add new column to positions"
+
+# 执行到最新版本
+alembic upgrade head
+
+# 回退一个版本
+alembic downgrade -1
+
+# 查看当前版本
+alembic current
+```
+
+**启动时自动迁移**：
+```python
+# app.py - 应用启动生命周期
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    validate_migrations()  # 自动校验并执行迁移
+    yield
+```
+
+---
+
 ## 3. 数据库表设计
 
 ### 3.1 trading_positions (持仓表)
@@ -384,4 +457,4 @@ INSERT INTO trading_orders (..., order_type='CLOSE');
 COMMIT;
 ```
 
-> **注意**：当前 `SqliteTradingStore` 尚未实现事务，这是待优化项。
+> **注意**：当前 `SqlalchemyTradingStore (repository/sqlalchemy_impl.py)` 尚未实现事务，这是待优化项。
