@@ -21,7 +21,11 @@ graph TB
         STRATEGY[Strategy 抽象基类]
         MARTINGALE[MartingaleStrategy]
         MICROCAP[MicroCapStrategy]
-        PICKER[SymbolPicker<br/>币种选择器]
+    end
+
+    subgraph "选币器层 (Pickers)"
+        PICKER[ISymbolPicker<br/>币种选择器]
+        ANALYZER[ITechnicalAnalyzer<br/>技术分析器]
     end
 
     subgraph "数据访问层 (Data Access)"
@@ -45,6 +49,7 @@ graph TB
     
     STRATEGY --> EXCHANGE
     STRATEGY --> PICKER
+    PICKER --> ANALYZER
     
     STORE --> SQLITE
     SQLITE --> DB
@@ -63,7 +68,8 @@ graph TB
 |------|------|----------|
 | **表现层** | 处理 HTTP 请求、路由分发、参数校验、响应格式化 | `app.py`, `api/*.py` |
 | **业务逻辑层** | 核心业务规则、领域模型、交易编排 | `exchange.py` |
-| **策略引擎层** | 交易策略实现、币种选择、执行调度 | `strategies/*.py` |
+| **策略引擎层** | 交易策略实现、执行调度 | `strategies/*.py` |
+| **选币器层** | 币种选择、技术分析（SMA/穿越信号） | `pickers/*.py` |
 | **数据访问层** | 数据持久化抽象、Repository 模式 | `repository/` |
 | **基础设施层** | 数据库、HTTP 客户端、日志、配置 | `config.py`, SQLite, Alembic |
 
@@ -102,29 +108,21 @@ trading_service/
 │
 ├── strategies/             # 策略引擎层
 │   ├── __init__.py
-│   ├── base.py             # Strategy 抽象基类
+│   ├── base.py             # Strategy 抽象基类 + StrategyConfig
 │   ├── martingale.py       # 马丁格尔策略
-│   ├── micro_cap.py        # 小市值策略
-│   └── symbol_picker.py    # 币种选择器
+│   └── micro_cap.py        # 微市值策略
+│
+├── pickers/                # 选币器与技术分析器层
+│   ├── __init__.py         # 统一导出
+│   ├── symbol_picker.py    # ISymbolPicker 接口 + 实现 + SymbolInfo
+│   └── technical_analyzer.py  # ITechnicalAnalyzer 接口 + TechnicalAnalyzer
 │
 ├── utils/                  # 工具函数
-│   └── symbol.py           # 交易对工具类
+│   └── symbol.py           # Symbol 交易对工具类
 │
 migrations/                 # Alembic 数据库迁移脚本
 ├── versions/               # 版本化迁移脚本
 └── env.py                  # Alembic 环境配置
-│
-├── strategies/             # 策略引擎层
-│   ├── __init__.py
-│   ├── base.py             # Strategy 抽象基类 + StrategyConfig
-│   ├── martingale.py       # 马丁格尔策略
-│   ├── micro_cap.py        # 微市值策略
-│   └── symbol_picker.py    # 币种选择器接口
-│
-└── utils/
-    ├── __init__.py
-    └── symbol.py           # Symbol 工具函数
-```
 
 ---
 

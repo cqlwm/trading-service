@@ -5,14 +5,16 @@
 from __future__ import annotations
 
 import inspect
-import pytest
 
 from trading_service.pickers import (
+    ITechnicalAnalyzer,
     ISymbolPicker,
     SimpleAlphaSymbolPicker,
     StaticListSymbolPicker,
     SymbolInfo,
+    TechnicalAnalyzer,
 )
+from trading_service.strategies.micro_cap import MicroCapSymbolPicker
 
 
 class TestSymbolPickerContracts:
@@ -31,6 +33,7 @@ class TestSymbolPickerContracts:
         all_pickers = [
             SimpleAlphaSymbolPicker,
             StaticListSymbolPicker,
+            MicroCapSymbolPicker,
         ]
 
         for picker_cls in all_pickers:
@@ -52,6 +55,21 @@ class TestSymbolPickerContracts:
         for field in required_fields:
             assert hasattr(info, field), \
                 f"❌ SymbolInfo 缺少必须字段: {field}"
+
+
+class TestTechnicalAnalyzerContracts:
+    """ITechnicalAnalyzer 接口契约测试。"""
+
+    def test_detect_200sma_signal_is_defined(self) -> None:
+        """✅ ITechnicalAnalyzer 必须定义 detect_200sma_signal 方法。"""
+        assert hasattr(ITechnicalAnalyzer, "detect_200sma_signal"), \
+            "❌ ITechnicalAnalyzer 必须定义 detect_200sma_signal 抽象方法"
+
+    def test_technical_analyzer_implements_interface(self) -> None:
+        """✅ TechnicalAnalyzer 必须实现 ITechnicalAnalyzer 接口。"""
+        analyzer: ITechnicalAnalyzer = TechnicalAnalyzer()
+        assert isinstance(analyzer, ITechnicalAnalyzer), \
+            "❌ TechnicalAnalyzer 必须实现 ITechnicalAnalyzer 接口"
 
 
 class TestModuleOrganization:
@@ -80,6 +98,7 @@ class TestModuleOrganization:
             "SymbolInfo",
             "StaticListSymbolPicker",
             "SimpleAlphaSymbolPicker",
+            "ITechnicalAnalyzer",
             "TechnicalAnalyzer",
             "CrossSignal",
         ]

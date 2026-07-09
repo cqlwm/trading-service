@@ -6,6 +6,7 @@ from trading_service.pickers.symbol_picker import (
 )
 from trading_service.pickers.technical_analyzer import (
     CrossSignal,
+    ITechnicalAnalyzer,
     TechnicalAnalyzer,
 )
 
@@ -14,6 +15,7 @@ __all__ = [
     "SymbolInfo",
     "StaticListSymbolPicker",
     "SimpleAlphaSymbolPicker",
+    "ITechnicalAnalyzer",
     "TechnicalAnalyzer",
     "CrossSignal",
 ]
