@@ -25,3 +25,11 @@ class MarketDirection(str, Enum):
     BULLISH = "bullish"
     BEARISH = "bearish"
     NEUTRAL = "neutral"
+
+
+class CrossSignalType(str, Enum):
+    """200 均线穿越信号类型。"""
+
+    GOLDEN = "golden"  # 金叉向上：收盘价从下向上穿越 SMA200
+    DEAD = "dead"  # 死叉向下：收盘价从上向下穿越 SMA200
+    NEAR = "near"  # 靠近均线：无穿越但价格在均线附近

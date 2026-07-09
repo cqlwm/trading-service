@@ -290,7 +290,7 @@ class ITechnicalAnalyzer(ABC):
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `cross_type` | str | "golden"(金叉) / "dead"(死叉) / "near"(靠近均线) |
+| `cross_type` | `CrossSignalType` | `GOLDEN`(金叉) / `DEAD`(死叉) / `NEAR`(靠近均线) |
 | `cross_ago` | int | 多少根 K 线前发生的穿越（0 为刚发生） |
 | `sma_200` | float | 200 均线价格 |
 | `distance_percent` | float | 价格相对均线的距离百分比 |
@@ -373,7 +373,7 @@ graph TD
 
 **买入信号判定**（`_is_buy_signal`）：
 - `is_sideways_bottom == True`：底部横盘（低波动 + 价格在 200 均线上方）
-- `cross_signal == "golden"`：金叉，收盘价从下向上突破 200 均线（近期突破）
+- `cross_signal == CrossSignalType.GOLDEN`：金叉，收盘价从下向上突破 200 均线（近期突破）
 
 > 选币与技术分析由 `SelectionPipeline(source=AlphaTokenSource, filters=[TechnicalAnalysisFilter])` 完成，策略只消费 `SymbolInfo` 的技术字段。
 

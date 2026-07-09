@@ -23,6 +23,7 @@ from trading_service.pickers import (
     TechnicalAnalysisFilter,
     TechnicalAnalyzer,
 )
+from trading_service.types import CrossSignalType
 
 
 def setup_logging() -> None:
@@ -55,11 +56,11 @@ def print_header(interval: str) -> None:
 
 def print_cross_icon(info: SymbolInfo) -> str:
     """根据信号类型返回图标。"""
-    if info.cross_signal == "golden":
+    if info.cross_signal == CrossSignalType.GOLDEN:
         return "🔥"
-    elif info.cross_signal == "dead":
+    elif info.cross_signal == CrossSignalType.DEAD:
         return "🔻"
-    elif info.cross_signal == "near":
+    elif info.cross_signal == CrossSignalType.NEAR:
         return "⚡"
     return "  "
 
@@ -76,8 +77,8 @@ def print_results(results: list[SymbolInfo], duration: float, interval: str) -> 
         return
 
     # 统计各类信号
-    golden = sum(1 for r in results if r.cross_signal == "golden")
-    near = sum(1 for r in results if r.cross_signal == "near")
+    golden = sum(1 for r in results if r.cross_signal == CrossSignalType.GOLDEN)
+    near = sum(1 for r in results if r.cross_signal == CrossSignalType.NEAR)
     sideways = sum(1 for r in results if r.is_sideways_bottom)
 
     print(f"✅ 筛选完成，共 {len(results)} 个代币符合条件")

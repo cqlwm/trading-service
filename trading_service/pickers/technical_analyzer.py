@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from trading_service.clients import BinanceFutureKline
+from trading_service.types import CrossSignalType
 
 
 @dataclass
@@ -11,7 +12,7 @@ class CrossSignal:
     """均线穿越信号。"""
 
     symbol: str
-    cross_type: str  # "golden": 金叉向上, "dead": 死叉向下, "near": 靠近均线
+    cross_type: CrossSignalType  # 金叉向上 / 死叉向下 / 靠近均线
     cross_ago: int  # 多少根K线之前发生的穿越（0是刚发生）
     current_price: float
     sma_200: float
@@ -80,7 +81,7 @@ class TechnicalAnalyzer(ITechnicalAnalyzer):
 
         # 找最近的穿越点
         last_cross_idx = -1
-        last_cross_type = ""
+        last_cross_type: CrossSignalType | None = None
 
         for i in range(len(klines) - check_last_n, len(klines)):
             prev_sma = sma_values[i - 1]
@@ -94,12 +95,12 @@ class TechnicalAnalyzer(ITechnicalAnalyzer):
             # 金叉：收盘价从下向上穿越SMA200
             if prev_close <= prev_sma and curr_close > curr_sma:
                 last_cross_idx = i
-                last_cross_type = "golden"
+                last_cross_type = CrossSignalType.GOLDEN
 
             # 死叉：收盘价从上向下穿越SMA200
             elif prev_close >= prev_sma and curr_close < curr_sma:
                 last_cross_idx = i
-                last_cross_type = "dead"
+                last_cross_type = CrossSignalType.DEAD
 
         # 计算当前价格与均线的距离
         last_sma = sma_values[-1]
@@ -116,7 +117,7 @@ class TechnicalAnalyzer(ITechnicalAnalyzer):
         )
 
         # 优先返回穿越信号
-        if last_cross_idx > 0:
+        if last_cross_idx > 0 and last_cross_type is not None:
             cross_ago = len(klines) - 1 - last_cross_idx
             return CrossSignal(
                 symbol=symbol,
@@ -133,7 +134,7 @@ class TechnicalAnalyzer(ITechnicalAnalyzer):
         if abs(distance_percent) <= near_threshold:
             return CrossSignal(
                 symbol=symbol,
-                cross_type="near",
+                cross_type=CrossSignalType.NEAR,
                 cross_ago=-1,
                 current_price=last_price,
                 sma_200=last_sma,
