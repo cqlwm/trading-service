@@ -6,14 +6,16 @@
 # 📁 核心目录职责
 # -----------------------
 trading_service/
-├── clients/           # 外部API客户端（币安等）
-│   └── 特点: 同步阻塞IO，非async
+├── pickers/           # ✅ 选币管道统一放在这里！不要再创建symbol_picker.py了！
+│   ├── base.py                  # 核心契约：SymbolInfo / ISymbolPicker / StaticListSymbolPicker
+│   ├── pipeline.py              # ISymbolSource / ISymbolFilter / SelectionPipeline 编排器
+│   ├── symbol_picker.py         # AlphaTokenSource 数据源（基础选币，不含技术分析）
+│   ├── technical_analyzer.py    # ITechnicalAnalyzer / TechnicalAnalyzer 技术分析工具
+│   └── technical_filter.py      # TechnicalAnalysisFilter（纯增强技术阶段）
 │
-├── pickers/           # ✅ 选币器统一放在这里！不要再创建symbol_picker.py了！
-│   ├── ISymbolPicker  # 接口基类，必须严格遵循
-│   ├── StaticListSymbolPicker   # 静态列表
-│   ├── SimpleAlphaSymbolPicker  # Alpha代币选币
-│   └── TechnicalAnalyzer        # 技术分析工具
+├── clients/           # 外部API客户端（币安等）
+│   ├── binance_client.py        # BinanceClient（同步阻塞IO，非async）
+│   └── protocols.py             # KlineClient / MarketDataClient 协议（结构化类型）
 │
 ├── strategies/        # 交易策略
 │   ├── BaseStrategy  # 所有策略基类，async框架
@@ -67,7 +69,7 @@ class SymbolInfo:
 # -----------------------
 # 📝 命名约定
 # -----------------------
-- 类名: PascalCase (SimpleAlphaSymbolPicker, BinanceFutureKline)
+- 类名: PascalCase (AlphaTokenSource, SelectionPipeline, BinanceFutureKline)
 - 方法/函数: snake_case (pick, _pick_sync, get_future_klines)
 - 私有方法: 下划线前缀 (_pick_sync, _analyze_symbol)
 - 测试文件: test_*.py

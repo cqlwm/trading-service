@@ -87,7 +87,7 @@ graph TD
 | `MockExchange` | `GET /api/market/prices` | 获取最新价格、盈亏计算（占位实现，待接入） | 策略执行时 |
 | `Strategy` | `GET /api/delistings` | 退市币种黑名单 | 每日一次 |
 
-> **说明**：币种筛选（`SimpleAlphaSymbolPicker`）与技术分析（`ITechnicalAnalyzer`）当前通过 `BinanceClient` 直接调用币安 API 获取 Alpha 代币列表、合约交易所信息与 K 线数据，不经过 News Service。`MicroCapSymbolPicker` 计划通过 News Service API 获取数据（当前为 stub）。
+> **说明**：币种筛选（`AlphaTokenSource`）与技术分析（`TechnicalAnalysisFilter` + `ITechnicalAnalyzer`）当前通过 `BinanceClient` 直接调用币安 API 获取 Alpha 代币列表、合约交易所信息与 K 线数据，不经过 News Service。后续计划通过 News Service API 获取数据（当前为 stub）。
 
 ### 3.2 HTTP 客户端配置
 
@@ -99,27 +99,32 @@ graph TD
 
 ### 3.3 币种筛选数据流
 
-`SimpleAlphaSymbolPicker` 直接调用币安 API（不经 News Service）：
+选币管道（`SelectionPipeline`）直接调用币安 API（不经 News Service）：
 
 ```mermaid
 sequenceDiagram
     participant Strategy as Strategy
-    participant Picker as SimpleAlphaSymbolPicker
+    participant Pipeline as SelectionPipeline
+    participant Source as AlphaTokenSource
+    participant Filter as TechnicalAnalysisFilter
     participant Analyzer as ITechnicalAnalyzer
     participant Binance as BinanceClient
 
-    Strategy->>Picker: pick()
-    Picker->>Binance: get_alpha_tokens() + get_future_exchange_info()
-    Binance-->>Picker: Alpha 代币 + 可交易合约
-    Picker->>Picker: 取交集 + 市值 < 5000万 过滤
-    Picker->>Binance: get_future_klines(symbol, "1d")
-    Binance-->>Picker: 昨日 K 线
-    Picker->>Picker: 阳线过滤
-    opt enable_technical_filter
-        Picker->>Analyzer: detect_200sma_signal(klines)
-        Analyzer-->>Picker: CrossSignal | None
-    end
-    Picker-->>Strategy: list[SymbolInfo]
+    Strategy->>Pipeline: pick()
+    Pipeline->>Source: fetch()
+    Source->>Binance: get_alpha_tokens() + get_future_exchange_info()
+    Binance-->>Source: Alpha 代币 + 可交易合约
+    Source->>Source: 取交集 + 市值 < 5000万 过滤
+    Source->>Binance: get_future_klines(symbol, "1d")
+    Binance-->>Source: 昨日 K 线
+    Source->>Source: 阳线过滤
+    Source-->>Pipeline: list[SymbolInfo]（基础字段）
+    Pipeline->>Filter: apply(infos)
+    Filter->>Analyzer: detect_200sma_signal(klines)
+    Analyzer-->>Filter: CrossSignal | None
+    Note over Filter: 纯增强：回填技术字段，不丢弃
+    Filter-->>Pipeline: list[SymbolInfo]（含技术字段）
+    Pipeline-->>Strategy: list[SymbolInfo]
 ```
 
 ### 3.4 容错设计

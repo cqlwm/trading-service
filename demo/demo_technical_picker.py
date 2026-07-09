@@ -16,7 +16,13 @@ import logging
 import time
 
 from trading_service.clients import BinanceClient
-from trading_service.pickers import SimpleAlphaSymbolPicker, SymbolInfo
+from trading_service.pickers import (
+    AlphaTokenSource,
+    SelectionPipeline,
+    SymbolInfo,
+    TechnicalAnalysisFilter,
+    TechnicalAnalyzer,
+)
 
 
 def setup_logging() -> None:
@@ -142,10 +148,15 @@ async def main() -> None:
     start_time = time.time()
 
     with BinanceClient(timeout=30) as client:
-        picker = SimpleAlphaSymbolPicker(
-            client=client,
-            enable_technical_filter=True,
-            kline_interval=args.interval,
+        picker = SelectionPipeline(
+            source=AlphaTokenSource(client=client),
+            filters=[
+                TechnicalAnalysisFilter(
+                    analyzer=TechnicalAnalyzer(),
+                    client=client,
+                    kline_interval=args.interval,
+                ),
+            ],
         )
         results = await picker.pick()
 

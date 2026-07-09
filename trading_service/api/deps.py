@@ -6,10 +6,17 @@ from fastapi import Depends
 
 from trading_service.config import settings
 from trading_service.exchange import MockExchange
-from trading_service.pickers import SimpleAlphaSymbolPicker, StaticListSymbolPicker
+from trading_service.pickers import (
+    AlphaTokenSource,
+    SelectionPipeline,
+    StaticListSymbolPicker,
+    TechnicalAnalysisFilter,
+    TechnicalAnalyzer,
+)
 from trading_service.repository import SqlalchemyTradingStore
 from trading_service.strategies.martingale import MartingaleConfig, MartingaleStrategy
 from trading_service.strategies.micro_cap import MicroCapConfig, MicroCapStrategy
+from trading_service.clients import BinanceClient
 from trading_service.utils.symbol import Symbol
 
 # 全局单例
@@ -23,11 +30,21 @@ _martingale_strategy = MartingaleStrategy(
         [Symbol("BTC", "USDT").binance(), Symbol("ETH", "USDT").binance()]
     ),
 )
+# 微市值：选币（AlphaTokenSource）-> 技术分析增强（TechnicalAnalysisFilter）-> 策略
+_micro_cap_client = BinanceClient(timeout=30)
 _micro_cap_strategy = MicroCapStrategy(
     exchange=_exchange,
     config=MicroCapConfig(),
-    # 微市值选币：市值<5000万 + 昨日上涨 + 200均线技术分析
-    symbol_picker=SimpleAlphaSymbolPicker(enable_technical_filter=True),
+    symbol_picker=SelectionPipeline(
+        source=AlphaTokenSource(client=_micro_cap_client),
+        filters=[
+            TechnicalAnalysisFilter(
+                analyzer=TechnicalAnalyzer(),
+                client=_micro_cap_client,
+                kline_interval="4h",
+            ),
+        ],
+    ),
 )
 
 

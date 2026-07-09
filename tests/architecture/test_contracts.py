@@ -7,17 +7,21 @@ from __future__ import annotations
 import inspect
 
 from trading_service.pickers import (
-    ITechnicalAnalyzer,
+    AlphaTokenSource,
+    ISymbolFilter,
     ISymbolPicker,
-    SimpleAlphaSymbolPicker,
+    ISymbolSource,
+    SelectionPipeline,
     StaticListSymbolPicker,
     SymbolInfo,
+    TechnicalAnalysisFilter,
     TechnicalAnalyzer,
+    ITechnicalAnalyzer,
 )
 
 
 class TestSymbolPickerContracts:
-    """ISymbolPicker 接口契约测试。"""
+    """ISymbolPicker 接口契约测试（策略层契约）。"""
 
     def test_pick_method_must_be_async(self) -> None:
         """✅ ISymbolPicker.pick() 必须是 async！
@@ -30,8 +34,8 @@ class TestSymbolPickerContracts:
     def test_all_pickers_have_async_pick(self) -> None:
         """✅ 所有 ISymbolPicker 实现类的 pick 都必须是 async。"""
         all_pickers = [
-            SimpleAlphaSymbolPicker,
             StaticListSymbolPicker,
+            SelectionPipeline,
         ]
 
         for picker_cls in all_pickers:
@@ -53,6 +57,50 @@ class TestSymbolPickerContracts:
         for field in required_fields:
             assert hasattr(info, field), \
                 f"❌ SymbolInfo 缺少必须字段: {field}"
+
+
+class TestPipelineContracts:
+    """管道抽象契约测试（组装层契约）。"""
+
+    def test_source_fetch_must_be_async(self) -> None:
+        """✅ ISymbolSource.fetch() 必须是 async。"""
+        assert inspect.iscoroutinefunction(ISymbolSource.fetch), \
+            "❌ ISymbolSource.fetch() 必须是 async 方法！"
+
+    def test_filter_apply_must_be_async(self) -> None:
+        """✅ ISymbolFilter.apply() 必须是 async。"""
+        assert inspect.iscoroutinefunction(ISymbolFilter.apply), \
+            "❌ ISymbolFilter.apply() 必须是 async 方法！"
+
+    def test_pipeline_implements_symbol_picker(self) -> None:
+        """✅ SelectionPipeline 必须实现 ISymbolPicker（对策略层透明）。"""
+        # 用最小可构造参数实例化（source 给一个内存 stub）
+        from trading_service.pickers.base import SymbolInfo as _Info
+
+        class _StubSource(ISymbolSource):
+            async def fetch(self) -> list[_Info]:
+                return []
+
+        pipeline = SelectionPipeline(source=_StubSource())
+        assert isinstance(pipeline, ISymbolPicker), \
+            "❌ SelectionPipeline 必须实现 ISymbolPicker，策略才能无感使用"
+
+    def test_alpha_source_implements_symbol_source(self) -> None:
+        """✅ AlphaTokenSource 必须实现 ISymbolSource。"""
+        # 用 stub client 构造，避免触发真实网络
+        from unittest.mock import MagicMock
+
+        source = AlphaTokenSource(client=MagicMock())  # type: ignore[arg-type]
+        assert isinstance(source, ISymbolSource)
+
+    def test_technical_filter_implements_symbol_filter(self) -> None:
+        """✅ TechnicalAnalysisFilter 必须实现 ISymbolFilter。"""
+        from unittest.mock import MagicMock
+
+        f = TechnicalAnalysisFilter(
+            analyzer=TechnicalAnalyzer(), client=MagicMock()  # type: ignore[arg-type]
+        )
+        assert isinstance(f, ISymbolFilter)
 
 
 class TestTechnicalAnalyzerContracts:
@@ -92,14 +140,35 @@ class TestModuleOrganization:
         from trading_service.pickers import __all__
 
         expected = [
+            # 核心契约
             "ISymbolPicker",
             "SymbolInfo",
             "StaticListSymbolPicker",
-            "SimpleAlphaSymbolPicker",
+            # 管道抽象
+            "ISymbolSource",
+            "ISymbolFilter",
+            "SelectionPipeline",
+            # 数据源
+            "AlphaTokenSource",
+            # 技术分析
             "ITechnicalAnalyzer",
             "TechnicalAnalyzer",
+            "TechnicalAnalysisFilter",
             "CrossSignal",
         ]
 
         for name in expected:
             assert name in __all__, f"❌ {name} 应该在 __all__ 中导出"
+
+    def test_simple_alpha_symbol_picker_removed(self) -> None:
+        """✅ 旧的 SimpleAlphaSymbolPicker 已被管道化重构移除。
+
+        选币器与技术分析已解耦：
+        - 选币 -> AlphaTokenSource（ISymbolSource）
+        - 技术分析 -> TechnicalAnalysisFilter（ISymbolFilter）
+        - 编排 -> SelectionPipeline（ISymbolPicker）
+        """
+        import trading_service.pickers as pickers
+
+        assert not hasattr(pickers, "SimpleAlphaSymbolPicker"), \
+            "❌ SimpleAlphaSymbolPicker 应已移除，改用 AlphaTokenSource + SelectionPipeline"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SimpleAlphaSymbolPicker 演示脚本。
+"""AlphaTokenSource 演示脚本（基础选币，不含技术分析）。
 
 运行示例:
     python demo_picker.py
@@ -11,7 +11,7 @@ import logging
 import time
 
 from trading_service.clients import BinanceClient
-from trading_service.pickers import SimpleAlphaSymbolPicker, SymbolInfo
+from trading_service.pickers import AlphaTokenSource, SymbolInfo
 
 
 def setup_logging() -> None:
@@ -84,8 +84,8 @@ async def main() -> None:
     start_time = time.time()
 
     with BinanceClient(timeout=30) as client:
-        picker = SimpleAlphaSymbolPicker(client=client)
-        results = await picker.pick()
+        picker = AlphaTokenSource(client=client)
+        results = await picker.fetch()
 
     duration = time.time() - start_time
     print()

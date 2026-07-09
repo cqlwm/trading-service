@@ -53,8 +53,26 @@ classDiagram
         +pick() list[SymbolInfo]
     }
 
-    class SimpleAlphaSymbolPicker {
+    class ISymbolSource {
+        <<interface>>
+        +fetch() list[SymbolInfo]
+    }
+
+    class ISymbolFilter {
+        <<interface>>
+        +apply(infos) list[SymbolInfo]
+    }
+
+    class SelectionPipeline {
         +pick() list[SymbolInfo]
+    }
+
+    class AlphaTokenSource {
+        +fetch() list[SymbolInfo]
+    }
+
+    class TechnicalAnalysisFilter {
+        +apply(infos) list[SymbolInfo]
     }
 
     class ITechnicalAnalyzer {
@@ -72,8 +90,12 @@ classDiagram
     StrategyConfig <|-- MicroCapConfig
 
     ISymbolPicker <|-- StaticListSymbolPicker
-    ISymbolPicker <|-- SimpleAlphaSymbolPicker
-    SimpleAlphaSymbolPicker --> ITechnicalAnalyzer : 注入
+    ISymbolPicker <|-- SelectionPipeline
+    SelectionPipeline --> ISymbolSource : 编排
+    SelectionPipeline --> ISymbolFilter : 编排
+    ISymbolSource <|-- AlphaTokenSource
+    ISymbolFilter <|-- TechnicalAnalysisFilter
+    TechnicalAnalysisFilter --> ITechnicalAnalyzer : 注入
 ```
 
 ---
@@ -117,11 +139,50 @@ class Strategy(ABC):
 
 ---
 
-## 3. 币种选择器
+## 3. 选币管道
 
-> **模块位置**：`trading_service/pickers/`（统一存放所有选币器与技术分析器，禁止放在 `strategies/` 下，由架构契约测试 `tests/architecture/test_contracts.py` 强制守护）
+> **模块位置**：`trading_service/pickers/`（统一存放选币管道与技术分析器，禁止放在 `strategies/` 下，由架构契约测试 `tests/architecture/test_contracts.py` 强制守护）
 
-### 3.1 ISymbolPicker 接口
+### 3.1 设计动机
+
+选币与技术分析是两个独立的关注点，原先通过 `SimpleAlphaSymbolPicker(enable_technical_filter=True)`
+的 bool 开关耦合在一起，导致：选币器背负两个职责、`SymbolInfo` 成为 God Struct、
+新增分析阶段只能继续往选币器里塞。重构为 **source -> filter -> 策略** 的管道模式后，
+技术分析成为独立、可组合的阶段，选币器回归纯净。
+
+### 3.2 三层抽象
+
+| 抽象 | 职责 | 语义 |
+|------|------|------|
+| `ISymbolSource` | 数据从哪来 | 生成器：`fetch()` 从无到有产出 `list[SymbolInfo]` |
+| `ISymbolFilter` | 怎么处理/增强 | 转换器：`apply(infos)` 接收并返回 `list[SymbolInfo]` |
+| `SelectionPipeline` | 编排 source + filters | 实现 `ISymbolPicker.pick()`，对策略层透明 |
+
+> **为何 source/filter 分离而非统一 `ISymbolStage`：** source 是"生成器"语义，
+> filter 是"转换器"语义。统一接口会迫使第一个阶段接收空列表、语义别扭。分离后
+> 每个接口职责单一，精确映射"选币 -> 技术分析"心智模型。
+
+```python
+class ISymbolSource(ABC):
+    @abstractmethod
+    async def fetch(self) -> list[SymbolInfo]: ...
+
+class ISymbolFilter(ABC):
+    @abstractmethod
+    async def apply(self, infos: list[SymbolInfo]) -> list[SymbolInfo]: ...
+
+class SelectionPipeline(ISymbolPicker):
+    def __init__(self, source: ISymbolSource, filters: list[ISymbolFilter] | None = None): ...
+    async def pick(self) -> list[SymbolInfo]:
+        infos = await self.source.fetch()
+        for f in self.filters:
+            infos = await f.apply(infos)
+        return infos
+```
+
+### 3.3 策略层契约（不变）
+
+策略只依赖 `ISymbolPicker.pick()`，与管道实现无关：
 
 ```python
 class ISymbolPicker(ABC):
@@ -133,47 +194,69 @@ class ISymbolPicker(ABC):
 **设计要点**：
 - `pick()` 为 **async** 方法，同步 IO 实现需用 `run_in_executor` 包装
 - 返回 `list[SymbolInfo]`（富数据载体），而非裸 `list[str]`
-- `SymbolInfo` 定义在 `pickers/symbol_picker.py`，包含基础字段、Alpha 扩展字段、技术分析字段三组
+- `SymbolInfo` 定义在 `pickers/base.py`，包含基础字段、Alpha 扩展字段、技术分析字段三组
+  （技术字段由 `TechnicalAnalysisFilter` 回填，数据源只填基础字段）
 
-### 3.2 实现类
+### 3.4 实现类
 
-| 实现类 | 数据源 | 用途 |
-|--------|--------|------|
-| `StaticListSymbolPicker` | 静态字符串列表 | 测试 / DI 占位 |
-| `SimpleAlphaSymbolPicker` | 币安 Alpha 代币 API + 合约 K 线 | 真实选币（马丁格尔、微市值均复用），可选叠加技术分析 |
+| 类 | 接口 | 数据源 | 用途 |
+|----|------|--------|------|
+| `StaticListSymbolPicker` | `ISymbolPicker` | 静态字符串列表 | 测试 / DI 占位（Martingale） |
+| `AlphaTokenSource` | `ISymbolSource` | 币安 Alpha 代币 API + 合约日 K | 真实选币（基础筛选，不含技术分析） |
+| `TechnicalAnalysisFilter` | `ISymbolFilter` | 合约 K 线 + `ITechnicalAnalyzer` | 纯增强：回填 200 均线技术字段，不丢弃 |
+| `SelectionPipeline` | `ISymbolPicker` | source + filters 编排 | 组合 source 与 filter，对策略透明 |
 
-> MicroCapStrategy 不再拥有专属选币器，复用 `SimpleAlphaSymbolPicker(enable_technical_filter=True)`。
-
-**SimpleAlphaSymbolPicker 筛选条件**：
+**AlphaTokenSource 筛选条件**（只做基础筛选）：
 1. Alpha 代币，市值 5000 万 USDT 以下
 2. 在合约交易所存在且处于可交易状态（status=="TRADING", quoteAsset=="USDT"）
 3. 昨日 K 线为阳线（收盘价 >= 开盘价）
-4. [可选] 200 均线附近，底部横盘或刚突破（通过 `ITechnicalAnalyzer`）
 
-### 3.3 调用流程
+> MicroCapStrategy 通过 `SelectionPipeline(source=AlphaTokenSource(...), filters=[TechnicalAnalysisFilter(...)])`
+> 组合选币与技术分析。MartingaleStrategy 直接用 `StaticListSymbolPicker`。
+
+### 3.5 调用流程
 
 ```mermaid
 sequenceDiagram
     participant Strategy as Strategy
-    participant Picker as SimpleAlphaSymbolPicker
+    participant Pipeline as SelectionPipeline
+    participant Source as AlphaTokenSource
+    participant Filter as TechnicalAnalysisFilter
     participant Analyzer as ITechnicalAnalyzer
     participant Binance as BinanceClient
 
-    Strategy->>Picker: pick()
-    Picker->>Binance: get_alpha_tokens() + get_future_exchange_info()
-    Binance-->>Picker: Alpha 代币 + 可交易合约
-    Picker->>Picker: 取交集 + 市值过滤
-    Picker->>Binance: get_future_klines(symbol, "1d")
-    Binance-->>Picker: 昨日 K 线
-    Picker->>Picker: 阳线过滤
-    opt enable_technical_filter
-        Picker->>Binance: get_future_klines(symbol, interval, 210)
-        Binance-->>Picker: K 线序列
-        Picker->>Analyzer: detect_200sma_signal(klines)
-        Analyzer-->>Picker: CrossSignal | None
+    Strategy->>Pipeline: pick()
+    Pipeline->>Source: fetch()
+    Source->>Binance: get_alpha_tokens() + get_future_exchange_info()
+    Binance-->>Source: Alpha 代币 + 可交易合约
+    Source->>Source: 取交集 + 市值过滤
+    Source->>Binance: get_future_klines(symbol, "1d")
+    Binance-->>Source: 昨日 K 线
+    Source->>Source: 阳线过滤
+    Source-->>Pipeline: list[SymbolInfo]（基础字段）
+    Pipeline->>Filter: apply(infos)
+    loop 每个 SymbolInfo
+        Filter->>Binance: get_future_klines(symbol, interval, 210)
+        Binance-->>Filter: K 线序列
+        Filter->>Analyzer: detect_200sma_signal(klines)
+        Analyzer-->>Filter: CrossSignal | None
+        Note over Filter: 纯增强：回填技术字段，不丢弃
     end
-    Picker-->>Strategy: list[SymbolInfo]
+    Filter-->>Pipeline: list[SymbolInfo]（含技术字段）
+    Pipeline-->>Strategy: list[SymbolInfo]
 ```
+
+### 3.6 客户端协议（降低耦合）
+
+`AlphaTokenSource` 与 `TechnicalAnalysisFilter` 不依赖具体的 `BinanceClient`，
+而是依赖 `clients/protocols.py` 中定义的结构化协议（Protocol）：
+
+| 协议 | 方法 | 消费者 |
+|------|------|--------|
+| `KlineClient` | `get_future_klines` | `TechnicalAnalysisFilter` |
+| `MarketDataClient` | `+ get_alpha_tokens` / `get_future_exchange_info` | `AlphaTokenSource` |
+
+`BinanceClient` 在结构上满足这些协议，无需显式继承；测试可注入内存实现（duck typing）。
 
 ---
 
@@ -196,9 +279,10 @@ class ITechnicalAnalyzer(ABC):
 ```
 
 **设计要点**：
-- 通过**依赖注入**提供给 `SimpleAlphaSymbolPicker`（构造函数 `analyzer` 参数），便于单元测试替换 mock
+- 通过**依赖注入**提供给 `TechnicalAnalysisFilter`（构造函数 `analyzer` 参数），便于单元测试替换 mock
 - `TechnicalAnalyzer` 是默认实现，提供 SMA 计算、200 均线穿越信号检测、底部横盘判定
 - 所有计算方法无状态，可安全共享单例
+- `TechnicalAnalysisFilter` 是**纯增强**：analyzer 返回 None 时 SymbolInfo 数量不减、技术字段保持默认；买入信号判定由策略负责（`MicroCapStrategy._is_buy_signal`）
 
 ### 4.2 信号类型
 
@@ -291,7 +375,7 @@ graph TD
 - `is_sideways_bottom == True`：底部横盘（低波动 + 价格在 200 均线上方）
 - `cross_signal == "golden"`：金叉，收盘价从下向上突破 200 均线（近期突破）
 
-> 选币与技术分析由 `SimpleAlphaSymbolPicker(enable_technical_filter=True)` 完成，策略只消费 `SymbolInfo` 的技术字段。
+> 选币与技术分析由 `SelectionPipeline(source=AlphaTokenSource, filters=[TechnicalAnalysisFilter])` 完成，策略只消费 `SymbolInfo` 的技术字段。
 
 ### 5.2 配置参数 (MicroCapConfig)
 
