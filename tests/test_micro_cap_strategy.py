@@ -17,7 +17,7 @@ import pytest
 from trading_service.exchange import MockExchange
 from trading_service.pickers import ISymbolPicker, SymbolInfo
 from trading_service.strategies.micro_cap import MicroCapConfig, MicroCapStrategy
-from trading_service.types import TradeDirection
+from trading_service.types import CrossSignalType, TradeDirection
 
 
 class FakeMicroCapPicker(ISymbolPicker):
@@ -38,7 +38,7 @@ def make_info(
     price: float = 1.0,
     market_cap: float = 10_000_000.0,
     is_sideways_bottom: bool = False,
-    cross_signal: str | None = None,
+    cross_signal: CrossSignalType | None = None,
 ) -> SymbolInfo:
     """构造一个带技术分析字段的 SymbolInfo。"""
     return SymbolInfo(
@@ -75,7 +75,7 @@ class TestMicroCapBuySignal:
         strategy = MicroCapStrategy(
             exchange, MicroCapConfig(), FakeMicroCapPicker([])
         )
-        info = make_info("ABCUSDT", cross_signal="golden")
+        info = make_info("ABCUSDT", cross_signal=CrossSignalType.GOLDEN)
         assert strategy._is_buy_signal(info) is True, "金叉应为买入信号"
 
     def test_dead_cross_not_buy_signal(self, exchange: MockExchange) -> None:
@@ -83,7 +83,7 @@ class TestMicroCapBuySignal:
         strategy = MicroCapStrategy(
             exchange, MicroCapConfig(), FakeMicroCapPicker([])
         )
-        info = make_info("ABCUSDT", cross_signal="dead")
+        info = make_info("ABCUSDT", cross_signal=CrossSignalType.DEAD)
         assert strategy._is_buy_signal(info) is False, "死叉不应买入"
 
     def test_near_not_buy_signal(self, exchange: MockExchange) -> None:
@@ -91,7 +91,7 @@ class TestMicroCapBuySignal:
         strategy = MicroCapStrategy(
             exchange, MicroCapConfig(), FakeMicroCapPicker([])
         )
-        info = make_info("ABCUSDT", cross_signal="near")
+        info = make_info("ABCUSDT", cross_signal=CrossSignalType.NEAR)
         assert strategy._is_buy_signal(info) is False, "near 不应买入"
 
     def test_no_signal_not_buy(self, exchange: MockExchange) -> None:
@@ -133,7 +133,7 @@ class TestMicroCapExecuteEntry:
         """正常路径：金叉突破信号 -> 开仓。"""
         config = MicroCapConfig(max_positions=5, position_size_usdt=10.0)
         picker = FakeMicroCapPicker(
-            [make_info("XYZUSDT", price=2.0, cross_signal="golden")]
+            [make_info("XYZUSDT", price=2.0, cross_signal=CrossSignalType.GOLDEN)]
         )
         strategy = MicroCapStrategy(exchange, config, picker)
         exchange.fetch_prices = AsyncMock(return_value={"XYZUSDT": 2.0})  # type: ignore
@@ -178,8 +178,8 @@ class TestMicroCapExecuteEntry:
         config = MicroCapConfig(max_positions=5, position_size_usdt=10.0)
         picker = FakeMicroCapPicker(
             [
-                make_info("AAAUSDT", cross_signal="dead"),
-                make_info("BBBUSDT", cross_signal="near"),
+                make_info("AAAUSDT", cross_signal=CrossSignalType.DEAD),
+                make_info("BBBUSDT", cross_signal=CrossSignalType.NEAR),
                 make_info("CCCUSDT"),  # 无信号
             ]
         )
@@ -205,7 +205,7 @@ class TestMicroCapExecuteEntry:
         picker = FakeMicroCapPicker(
             [
                 make_info("AAAUSDT", price=1.0, is_sideways_bottom=True),  # 已持仓
-                make_info("BBBUSDT", price=2.0, cross_signal="golden"),  # 新信号
+                make_info("BBBUSDT", price=2.0, cross_signal=CrossSignalType.GOLDEN),  # 新信号
             ]
         )
         strategy = MicroCapStrategy(exchange, config, picker)
@@ -230,7 +230,7 @@ class TestMicroCapExecuteEntry:
         picker = FakeMicroCapPicker(
             [
                 make_info("AAAUSDT", price=1.0, is_sideways_bottom=True),
-                make_info("BBBUSDT", price=2.0, cross_signal="golden"),
+                make_info("BBBUSDT", price=2.0, cross_signal=CrossSignalType.GOLDEN),
                 make_info("CCCUSDT", price=3.0, is_sideways_bottom=True),
             ]
         )

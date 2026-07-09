@@ -10,6 +10,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from trading_service.types import CrossSignalType
+
 
 @dataclass
 class SymbolInfo:
@@ -35,7 +37,7 @@ class SymbolInfo:
     # === 技术分析字段（由 TechnicalAnalysisFilter 回填，默认为空）===
     sma_200: float | None = None  # 200均线价格
     price_vs_sma200_percent: float | None = None  # 价格相对均线的距离%
-    cross_signal: str | None = None  # 穿越信号: golden/dead/near/None
+    cross_signal: CrossSignalType | None = None  # 穿越信号: GOLDEN/DEAD/NEAR/None
     cross_ago: int | None = None  # 多少根K线之前穿越的
     is_sideways_bottom: bool = False  # 是否底部横盘
     volatility_10: float | None = None  # 最近10根K线波动率%

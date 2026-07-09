@@ -14,6 +14,7 @@ from trading_service.pickers.technical_analyzer import (
     ITechnicalAnalyzer,
     TechnicalAnalyzer,
 )
+from trading_service.types import CrossSignalType
 
 
 def make_kline(
@@ -113,7 +114,7 @@ class TestDetect200smaGoldenCross:
 
         result = TechnicalAnalyzer().detect_200sma_signal(klines, "BTCUSDT")
         assert result is not None, "金叉应返回信号"
-        assert result.cross_type == "golden", f"信号类型应为 golden，实际 {result.cross_type}"
+        assert result.cross_type == CrossSignalType.GOLDEN, f"信号类型应为 golden，实际 {result.cross_type}"
         assert result.cross_ago >= 0
 
     def test_detect_dead_cross(self) -> None:
@@ -126,7 +127,7 @@ class TestDetect200smaGoldenCross:
 
         result = TechnicalAnalyzer().detect_200sma_signal(klines, "BTCUSDT")
         assert result is not None
-        assert result.cross_type == "dead", f"信号类型应为 dead，实际 {result.cross_type}"
+        assert result.cross_type == CrossSignalType.DEAD, f"信号类型应为 dead，实际 {result.cross_type}"
 
 
 class TestDetect200smaNearAndPriority:
@@ -143,7 +144,7 @@ class TestDetect200smaNearAndPriority:
 
         result = TechnicalAnalyzer().detect_200sma_signal(klines, "BTCUSDT")
         assert result is not None
-        assert result.cross_type == "near", f"应返回 near，实际 {result.cross_type}"
+        assert result.cross_type == CrossSignalType.NEAR, f"应返回 near，实际 {result.cross_type}"
 
     def test_returns_none_when_far_from_sma_no_cross(self) -> None:
         """正常路径：无穿越且远离均线（距离>5%），返回 None。"""
@@ -163,7 +164,7 @@ class TestDetect200smaNearAndPriority:
 
         result = TechnicalAnalyzer().detect_200sma_signal(klines, "BTCUSDT")
         assert result is not None
-        assert result.cross_type == "golden", "金叉应优先于 near"
+        assert result.cross_type == CrossSignalType.GOLDEN, "金叉应优先于 near"
 
 
 class TestDetect200smaVolatilityAndSideways:
@@ -229,7 +230,7 @@ class TestCrossSignalDataclass:
         """正常路径：CrossSignal 包含所有必要字段。"""
         signal = CrossSignal(
             symbol="BTCUSDT",
-            cross_type="golden",
+            cross_type=CrossSignalType.GOLDEN,
             cross_ago=0,
             current_price=100.0,
             sma_200=95.0,
@@ -238,7 +239,7 @@ class TestCrossSignalDataclass:
             is_sideways=False,
         )
         assert signal.symbol == "BTCUSDT"
-        assert signal.cross_type == "golden"
+        assert signal.cross_type == CrossSignalType.GOLDEN
         assert signal.is_sideways is False
 
 

@@ -50,7 +50,7 @@ class SymbolInfo:
     yesterday_change_percent: float = 0.0
     # 技术分析字段
     sma_200: float | None = None
-    cross_signal: str | None = None
+    cross_signal: CrossSignalType | None = None
     is_sideways_bottom: bool = False
     # ...
 

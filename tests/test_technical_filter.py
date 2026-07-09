@@ -17,6 +17,7 @@ from trading_service.clients import BinanceFutureKline
 from trading_service.pickers import SymbolInfo, TechnicalAnalyzer
 from trading_service.pickers.pipeline import ISymbolFilter
 from trading_service.pickers.technical_filter import TechnicalAnalysisFilter
+from trading_service.types import CrossSignalType
 
 
 def make_kline(
@@ -98,7 +99,7 @@ class TestTechnicalFilterEnrichment:
 
         assert len(result) == 1
         info = result[0]
-        assert info.cross_signal == "golden", f"应回填 golden，实际 {info.cross_signal}"
+        assert info.cross_signal == CrossSignalType.GOLDEN, f"应回填 golden，实际 {info.cross_signal}"
         assert info.sma_200 is not None, "sma_200 应已回填"
         assert info.price_vs_sma200_percent is not None
         assert info.volatility_10 is not None
@@ -172,7 +173,7 @@ class TestTechnicalFilterPureEnrichment:
         result = await f.apply([make_info("GOLDUSDT"), make_info("FARUSDT")])
         assert len(result) == 2, "两个都应保留"
         by_sym = {i.symbol: i for i in result}
-        assert by_sym["GOLDUSDT"].cross_signal == "golden"
+        assert by_sym["GOLDUSDT"].cross_signal == CrossSignalType.GOLDEN
         assert by_sym["FARUSDT"].cross_signal is None
 
 
@@ -225,5 +226,5 @@ class TestTechnicalFilterIdempotency:
 
         r1 = await f.apply([make_info("ABCUSDT")])
         r2 = await f.apply([make_info("ABCUSDT")])
-        assert r1[0].cross_signal == r2[0].cross_signal == "golden"
+        assert r1[0].cross_signal == r2[0].cross_signal == CrossSignalType.GOLDEN
         assert r1[0].sma_200 == r2[0].sma_200

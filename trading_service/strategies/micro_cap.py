@@ -6,10 +6,7 @@ from dataclasses import dataclass
 from trading_service.exchange import MockExchange
 from trading_service.pickers import ISymbolPicker, SymbolInfo
 from trading_service.strategies.base import Strategy, StrategyConfig
-from trading_service.types import TradeDirection
-
-# 金叉穿越信号 - 收盘价从下向上突破 200 均线，视为"近期突破"
-GOLDEN_CROSS = "golden"
+from trading_service.types import CrossSignalType, TradeDirection
 
 
 @dataclass
@@ -86,12 +83,12 @@ class MicroCapStrategy(Strategy):
 
     def _is_buy_signal(self, info: SymbolInfo) -> bool:
         """判定是否为买入信号：横盘或近期金叉突破。"""
-        return info.is_sideways_bottom or info.cross_signal == GOLDEN_CROSS
+        return info.is_sideways_bottom or info.cross_signal == CrossSignalType.GOLDEN
 
     @staticmethod
     def _entry_reason(info: SymbolInfo) -> str:
         """根据信号类型生成开仓原因，便于审计。"""
-        if info.cross_signal == GOLDEN_CROSS:
+        if info.cross_signal == CrossSignalType.GOLDEN:
             return "micro_cap_entry_breakout"
         return "micro_cap_entry_sideways"
 
