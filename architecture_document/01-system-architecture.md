@@ -23,8 +23,10 @@ graph TB
         MICROCAP[MicroCapStrategy]
     end
 
-    subgraph "选币器层 (Pickers)"
-        PICKER[ISymbolPicker<br/>币种选择器]
+    subgraph "选币管道层 (Pickers Pipeline)"
+        PICKER[ISymbolPicker<br/>策略层契约]
+        SOURCE[ISymbolSource<br/>数据源]
+        FILTER[ISymbolFilter<br/>过滤/增强阶段]
         ANALYZER[ITechnicalAnalyzer<br/>技术分析器]
     end
 
@@ -49,7 +51,9 @@ graph TB
     
     STRATEGY --> EXCHANGE
     STRATEGY --> PICKER
-    PICKER --> ANALYZER
+    PICKER --> SOURCE
+    PICKER --> FILTER
+    FILTER --> ANALYZER
     
     STORE --> SQLITE
     SQLITE --> DB
@@ -69,7 +73,7 @@ graph TB
 | **表现层** | 处理 HTTP 请求、路由分发、参数校验、响应格式化 | `app.py`, `api/*.py` |
 | **业务逻辑层** | 核心业务规则、领域模型、交易编排 | `exchange.py` |
 | **策略引擎层** | 交易策略实现、执行调度 | `strategies/*.py` |
-| **选币器层** | 币种选择、技术分析（SMA/穿越信号） | `pickers/*.py` |
+| **选币管道层** | 选币（数据源）+ 技术分析（过滤增强）+ 管道编排 | `pickers/*.py` |
 | **数据访问层** | 数据持久化抽象、Repository 模式 | `repository/` |
 | **基础设施层** | 数据库、HTTP 客户端、日志、配置 | `config.py`, SQLite, Alembic |
 
@@ -112,10 +116,17 @@ trading_service/
 │   ├── martingale.py       # 马丁格尔策略
 │   └── micro_cap.py        # 微市值策略
 │
-├── pickers/                # 选币器与技术分析器层
+├── pickers/                # 选币管道层：source -> filter -> 策略
 │   ├── __init__.py         # 统一导出
-│   ├── symbol_picker.py    # ISymbolPicker 接口 + 实现 + SymbolInfo
-│   └── technical_analyzer.py  # ITechnicalAnalyzer 接口 + TechnicalAnalyzer
+│   ├── base.py             # 核心契约：SymbolInfo / ISymbolPicker / StaticListSymbolPicker
+│   ├── pipeline.py         # ISymbolSource / ISymbolFilter / SelectionPipeline 编排器
+│   ├── symbol_picker.py    # AlphaTokenSource 数据源（基础选币，不含技术分析）
+│   ├── technical_analyzer.py  # ITechnicalAnalyzer 接口 + TechnicalAnalyzer
+│   └── technical_filter.py # TechnicalAnalysisFilter（纯增强技术阶段）
+│
+├── clients/                # 外部交易所客户端
+│   ├── binance_client.py   # BinanceClient（HTTP 调用）
+│   └── protocols.py        # KlineClient / MarketDataClient 协议（结构化类型）
 │
 ├── utils/                  # 工具函数
 │   └── symbol.py           # Symbol 交易对工具类
