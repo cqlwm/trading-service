@@ -6,7 +6,7 @@ from fastapi import Depends
 
 from trading_service.config import settings
 from trading_service.exchange import MockExchange
-from trading_service.pickers import StaticListSymbolPicker
+from trading_service.pickers import SimpleAlphaSymbolPicker, StaticListSymbolPicker
 from trading_service.repository import SqlalchemyTradingStore
 from trading_service.strategies.martingale import MartingaleConfig, MartingaleStrategy
 from trading_service.strategies.micro_cap import MicroCapConfig, MicroCapStrategy
@@ -26,6 +26,8 @@ _martingale_strategy = MartingaleStrategy(
 _micro_cap_strategy = MicroCapStrategy(
     exchange=_exchange,
     config=MicroCapConfig(),
+    # 微市值选币：市值<5000万 + 昨日上涨 + 200均线技术分析
+    symbol_picker=SimpleAlphaSymbolPicker(enable_technical_filter=True),
 )
 
 

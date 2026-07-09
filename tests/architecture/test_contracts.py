@@ -14,7 +14,6 @@ from trading_service.pickers import (
     SymbolInfo,
     TechnicalAnalyzer,
 )
-from trading_service.strategies.micro_cap import MicroCapSymbolPicker
 
 
 class TestSymbolPickerContracts:
@@ -33,7 +32,6 @@ class TestSymbolPickerContracts:
         all_pickers = [
             SimpleAlphaSymbolPicker,
             StaticListSymbolPicker,
-            MicroCapSymbolPicker,
         ]
 
         for picker_cls in all_pickers:

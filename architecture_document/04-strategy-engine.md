@@ -57,10 +57,6 @@ classDiagram
         +pick() list[SymbolInfo]
     }
 
-    class MicroCapSymbolPicker {
-        +pick() list[SymbolInfo]
-    }
-
     class ITechnicalAnalyzer {
         <<interface>>
         +detect_200sma_signal() CrossSignal | None
@@ -77,7 +73,6 @@ classDiagram
 
     ISymbolPicker <|-- StaticListSymbolPicker
     ISymbolPicker <|-- SimpleAlphaSymbolPicker
-    ISymbolPicker <|-- MicroCapSymbolPicker
     SimpleAlphaSymbolPicker --> ITechnicalAnalyzer : 注入
 ```
 
@@ -145,8 +140,9 @@ class ISymbolPicker(ABC):
 | 实现类 | 数据源 | 用途 |
 |--------|--------|------|
 | `StaticListSymbolPicker` | 静态字符串列表 | 测试 / DI 占位 |
-| `SimpleAlphaSymbolPicker` | 币安 Alpha 代币 API + 合约 K 线 | 真实选币，可选叠加技术分析 |
-| `MicroCapSymbolPicker` | news-service API（TODO） | 微市值策略选币（当前为 stub） |
+| `SimpleAlphaSymbolPicker` | 币安 Alpha 代币 API + 合约 K 线 | 真实选币（马丁格尔、微市值均复用），可选叠加技术分析 |
+
+> MicroCapStrategy 不再拥有专属选币器，复用 `SimpleAlphaSymbolPicker(enable_technical_filter=True)`。
 
 **SimpleAlphaSymbolPicker 筛选条件**：
 1. Alpha 代币，市值 5000 万 USDT 以下
@@ -282,40 +278,42 @@ breakeven_price = Σ(price_i * size_i) / total_size
 
 ```mermaid
 graph TD
-    A[获取微市值币种列表] --> B[筛选 Top N 币种]
-    B --> C[检查持仓币种]
-    
-    C --> D{币种仍在 Top N?}
-    D -->|是| E[继续持有]
-    D -->|否| F[卖出换仓]
-    
-    C --> G{新币种进入 Top N?}
-    G -->|是| H[买入新币种]
-    G -->|否| I[不操作]
-    
-    F --> J[调仓完成]
-    H --> J
+    A[SymbolPicker 选币<br/>市值<5000万 + 昨日上涨] --> B[技术分析过滤]
+    B --> C{横盘 或 金叉突破?}
+    C -->|是| D[买入 position_size_usdt]
+    C -->|否| E[不操作]
+    D --> F{已达 max_positions?}
+    F -->|是| G[停止开仓]
+    F -->|否| H[继续下一个候选]
 ```
+
+**买入信号判定**（`_is_buy_signal`）：
+- `is_sideways_bottom == True`：底部横盘（低波动 + 价格在 200 均线上方）
+- `cross_signal == "golden"`：金叉，收盘价从下向上突破 200 均线（近期突破）
+
+> 选币与技术分析由 `SimpleAlphaSymbolPicker(enable_technical_filter=True)` 完成，策略只消费 `SymbolInfo` 的技术字段。
 
 ### 5.2 配置参数 (MicroCapConfig)
 
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
-| `portfolio_size` | int | 10 | 持仓币种数量 |
-| `rebalance_hours` | int | 24 | 调仓间隔 (小时) |
-| `min_volume_24h` | float | 1,000,000 | 最低 24h 成交量 ($) |
-| `max_market_cap_rank` | int | 200 | 最大市值排名 |
-| `equal_weight` | bool | True | 是否等权重分配 |
+| `max_positions` | int | 10 | 最大同时持仓数 |
+| `position_size_usdt` | float | 10.0 | 单笔买入金额（USDT） |
+| `take_profit_pct` | float | 5.0 | 止盈百分比（下一轮实现） |
+| `stop_loss_pct` | float | 15.0 | 止损百分比（下一轮实现） |
+| `min_volume_usdt` | float | 1,000,000 | 最低 24h 成交量（由选币器使用） |
+| `max_market_cap` | float | 50,000,000 | 最大市值（由选币器使用） |
 
-### 5.3 调仓逻辑
+### 5.3 入场逻辑
 
-1. **获取候选池**：市值 100-200 名，成交量 > $1M
-2. **评分排序**：结合波动率、成交量、社交热度
-3. **组合构建**：等权重分配资金到 Top N 币种
-4. **调仓执行**：
-   - 移出不在 Top N 的币种
-   - 买入新进入 Top N 的币种
-   - 调整仓位至目标权重
+1. **检查配额**：当前 `tag="micro_cap"` 的 open 持仓数 >= `max_positions` 则直接返回
+2. **选币**：`symbol_picker.pick()` 返回候选 `SymbolInfo`（已含技术分析字段）
+3. **过滤**：排除已持仓 symbol；只保留 `_is_buy_signal` 通过的
+4. **开仓**：按 `max_positions - current_count` 配额，对候选开多仓
+   - `size = position_size_usdt`（10 USDT）
+   - `reason` 区分 `micro_cap_entry_sideways` / `micro_cap_entry_breakout`
+
+> 止盈/止损、调仓换仓留待后续迭代。
 
 ---
 
