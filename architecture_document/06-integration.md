@@ -84,10 +84,10 @@ graph TD
 
 | 调用方 | 接口 | 用途 | 频率 |
 |--------|------|------|------|
-| `SymbolPicker` | `GET /api/rankings` | 币种筛选、微市值策略 | 策略执行时 |
-| `MockExchange` | `GET /api/market/prices` | 获取最新价格、盈亏计算 | 策略执行时 |
-| `Strategy` | `GET /api/klines/{symbol}` | K线分析、技术指标 | 策略逻辑内 |
+| `MockExchange` | `GET /api/market/prices` | 获取最新价格、盈亏计算（占位实现，待接入） | 策略执行时 |
 | `Strategy` | `GET /api/delistings` | 退市币种黑名单 | 每日一次 |
+
+> **说明**：币种筛选（`SimpleAlphaSymbolPicker`）与技术分析（`ITechnicalAnalyzer`）当前通过 `BinanceClient` 直接调用币安 API 获取 Alpha 代币列表、合约交易所信息与 K 线数据，不经过 News Service。`MicroCapSymbolPicker` 计划通过 News Service API 获取数据（当前为 stub）。
 
 ### 3.2 HTTP 客户端配置
 
@@ -97,27 +97,29 @@ graph TD
 | `news_service_base_url` | `http://127.0.0.1:8000` | News Service 地址 |
 | `news_service_timeout` | `30` | 超时时间（秒） |
 
-### 3.3 币种筛选调用流程
+### 3.3 币种筛选数据流
+
+`SimpleAlphaSymbolPicker` 直接调用币安 API（不经 News Service）：
 
 ```mermaid
 sequenceDiagram
-    participant Strategy as MicroCapStrategy
-    participant Picker as NewsServiceSymbolPicker
-    participant HTTP as HTTP Client
-    participant NS as News Service
+    participant Strategy as Strategy
+    participant Picker as SimpleAlphaSymbolPicker
+    participant Analyzer as ITechnicalAnalyzer
+    participant Binance as BinanceClient
 
-    Strategy->>Picker: pick_symbols(count=10)
-    Picker->>HTTP: GET /api/rankings?limit=200&min_volume=1000000
-    
-    HTTP->>NS: HTTP GET /api/rankings
-    NS-->>HTTP: 200 OK + 排名列表
-    HTTP-->>Picker: [symbol, market_cap, volume, price_change...]
-    
-    Picker->>Picker: 过滤市值 100-200 名
-    Picker->>Picker: 过滤成交量 < $1M
-    Picker->>Picker: 排除退市币种
-    
-    Picker-->>Strategy: [top_10_symbols...]
+    Strategy->>Picker: pick()
+    Picker->>Binance: get_alpha_tokens() + get_future_exchange_info()
+    Binance-->>Picker: Alpha 代币 + 可交易合约
+    Picker->>Picker: 取交集 + 市值 < 5000万 过滤
+    Picker->>Binance: get_future_klines(symbol, "1d")
+    Binance-->>Picker: 昨日 K 线
+    Picker->>Picker: 阳线过滤
+    opt enable_technical_filter
+        Picker->>Analyzer: detect_200sma_signal(klines)
+        Analyzer-->>Picker: CrossSignal | None
+    end
+    Picker-->>Strategy: list[SymbolInfo]
 ```
 
 ### 3.4 容错设计

@@ -6,10 +6,11 @@ from fastapi import Depends
 
 from trading_service.config import settings
 from trading_service.exchange import MockExchange
+from trading_service.pickers import StaticListSymbolPicker
 from trading_service.repository import SqlalchemyTradingStore
 from trading_service.strategies.martingale import MartingaleConfig, MartingaleStrategy
 from trading_service.strategies.micro_cap import MicroCapConfig, MicroCapStrategy
-from trading_service.strategies.symbol_picker import StaticListSymbolPicker
+from trading_service.utils.symbol import Symbol
 
 # 全局单例
 _trading_store = SqlalchemyTradingStore(settings.db_path)
@@ -17,7 +18,10 @@ _exchange = MockExchange(db=_trading_store)
 _martingale_strategy = MartingaleStrategy(
     exchange=_exchange,
     config=MartingaleConfig(),
-    symbol_picker=StaticListSymbolPicker(["BTC/USDT", "ETH/USDT"]),
+    # 统一使用 binance 原生格式（BTCUSDT），与 DB 存储、fetch_prices key 对齐
+    symbol_picker=StaticListSymbolPicker(
+        [Symbol("BTC", "USDT").binance(), Symbol("ETH", "USDT").binance()]
+    ),
 )
 _micro_cap_strategy = MicroCapStrategy(
     exchange=_exchange,

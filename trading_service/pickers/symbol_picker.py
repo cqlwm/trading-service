@@ -5,7 +5,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from trading_service.clients import BinanceClient
-from trading_service.pickers.technical_analyzer import TechnicalAnalyzer
+from trading_service.pickers.technical_analyzer import (
+    ITechnicalAnalyzer,
+    TechnicalAnalyzer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,11 +95,13 @@ class SimpleAlphaSymbolPicker(ISymbolPicker):
         client: BinanceClient | None = None,
         enable_technical_filter: bool = False,
         kline_interval: str = "4h",
+        analyzer: ITechnicalAnalyzer | None = None,
     ) -> None:
         self.client = client or BinanceClient(timeout=30)
         self.enable_technical_filter = enable_technical_filter
         self.kline_interval = kline_interval
-        self.analyzer = TechnicalAnalyzer()
+        # 依赖注入：便于单元测试时替换为 mock analyzer
+        self.analyzer: ITechnicalAnalyzer = analyzer or TechnicalAnalyzer()
 
     async def pick(self) -> list[SymbolInfo]:
         """筛选符合条件的代币（async 接口）。"""

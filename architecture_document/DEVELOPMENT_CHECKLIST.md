@@ -13,6 +13,7 @@
 | 功能 | 应该放哪里 | 不要放哪里 |
 |---|---|---
 选币器逻辑 | `trading_service/pickers/` | `strategies/symbol_picker.py`
+技术分析器 | `trading_service/pickers/technical_analyzer.py` | 散落在策略内
 外部 API 客户端 | `trading_service/clients/` | 随便放
 策略交易逻辑 | `trading_service/strategies/` | 不要混入选币逻辑
 数据模型 | 已有 model 就复用 | 不要重新定义同样的类
@@ -47,6 +48,7 @@
 |---|---|---
 ❌ 把 pick() 写成同步 | 忘记 ISymbolPicker 是 async 框架 | `async def pick(self)`，需要同步IO时套 `run_in_executor`
 ❌ 在多个地方定义 SymbolInfo | 不知道已有定义 | `from trading_service.pickers import SymbolInfo`
+❌ 硬编码 new TechnicalAnalyzer | 不可测试、违反依赖倒置 | 通过构造函数注入 `ITechnicalAnalyzer`
 ❌ 测试通过但 pyright 报错 | 类型注解有问题 | 严格通过 0 errors 0 warnings
 ❌ 在 close() 里写逻辑 | 对象生命周期搞错 | 用 `__aenter__/__aexit__` 管理 async 资源
 

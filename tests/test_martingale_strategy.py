@@ -9,18 +9,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from trading_service.exchange import MockExchange
+from trading_service.pickers import StaticListSymbolPicker
 from trading_service.strategies.martingale import MartingaleConfig, MartingaleStrategy
-from trading_service.strategies.symbol_picker import ISymbolPicker, SymbolInfo
 from trading_service.types import OrderType, TradeDirection
-
-
-class FakeSymbolPicker(ISymbolPicker):
-    """模拟币种选择器。"""
-    def __init__(self, symbols: list[str]) -> None:
-        self.symbols = symbols
-
-    async def pick(self) -> list[SymbolInfo]:
-        return [SymbolInfo(symbol=s, price=0.0, volume_24h=0.0, market_cap=0.0, price_change_pct_24h=0.0) for s in self.symbols]
 
 
 @pytest.fixture
@@ -36,7 +27,7 @@ class TestMartingaleExecute:
         """当没有持仓时，策略应该开第一个仓位。"""
         # ARRANGE
         config = MartingaleConfig(max_positions=1, base_order_size=100.0)
-        symbol_picker = FakeSymbolPicker(["BTCUSDT"])
+        symbol_picker = StaticListSymbolPicker(["BTCUSDT"])
         strategy = MartingaleStrategy(exchange, config, symbol_picker)
 
         # Mock fetch_prices 返回价格
@@ -65,7 +56,7 @@ class TestMartingaleExecute:
         )
 
         config = MartingaleConfig(max_positions=2, base_order_size=100.0)
-        symbol_picker = FakeSymbolPicker(["SOLUSDT"])
+        symbol_picker = StaticListSymbolPicker(["SOLUSDT"])
         strategy = MartingaleStrategy(exchange, config, symbol_picker)
         exchange.fetch_prices = AsyncMock(return_value={"SOLUSDT": 100.0})  # type: ignore
 
@@ -86,7 +77,7 @@ class TestMartingaleExecute:
         )
 
         config = MartingaleConfig(max_positions=5, base_order_size=100.0)
-        symbol_picker = FakeSymbolPicker(["BTCUSDT", "ETHUSDT"])
+        symbol_picker = StaticListSymbolPicker(["BTCUSDT", "ETHUSDT"])
         strategy = MartingaleStrategy(exchange, config, symbol_picker)
         exchange.fetch_prices = AsyncMock(return_value={"BTCUSDT": 50000.0, "ETHUSDT": 3000.0})  # type: ignore
 
@@ -119,7 +110,7 @@ class TestMartingaleAddPosition:
             safety_order_step_scale=1.5,  # 每 1.5% 下跌加仓
             safety_order_volume_scale=2.0,  # 加仓量翻倍
         )
-        symbol_picker = FakeSymbolPicker([])  # 没有新币种
+        symbol_picker = StaticListSymbolPicker([])  # 没有新币种
         strategy = MartingaleStrategy(exchange, config, symbol_picker)
 
         # 价格下跌 2%，触发加仓
@@ -158,7 +149,7 @@ class TestMartingaleAddPosition:
             ))
 
         config = MartingaleConfig(max_positions=1, safety_order_count=3)
-        symbol_picker = FakeSymbolPicker([])
+        symbol_picker = StaticListSymbolPicker([])
         strategy = MartingaleStrategy(exchange, config, symbol_picker)
         exchange.fetch_prices = AsyncMock(return_value={"BTCUSDT": 45000.0})
 
@@ -188,7 +179,7 @@ class TestMartingaleTakeProfit:
             base_order_size=100.0,
             take_profit_pct=1.5,  # 1.5% 止盈
         )
-        symbol_picker = FakeSymbolPicker([])
+        symbol_picker = StaticListSymbolPicker([])
         strategy = MartingaleStrategy(exchange, config, symbol_picker)
 
         # 价格上涨 2%，触发止盈
@@ -212,7 +203,7 @@ class TestMartingaleTakeProfit:
         )
 
         config = MartingaleConfig(max_positions=1, take_profit_pct=2.0)
-        symbol_picker = FakeSymbolPicker([])
+        symbol_picker = StaticListSymbolPicker([])
         strategy = MartingaleStrategy(exchange, config, symbol_picker)
 
         # 只上涨 1%，未达到止盈目标
@@ -239,7 +230,7 @@ class TestMartingaleTakeProfit:
         )
 
         config = MartingaleConfig(max_positions=1, take_profit_pct=1.5)
-        symbol_picker = FakeSymbolPicker([])
+        symbol_picker = StaticListSymbolPicker([])
         strategy = MartingaleStrategy(exchange, config, symbol_picker)
 
         # 价格从 49000 回升到 50100（相对于均价 49333，上涨约 1.55%）
@@ -271,7 +262,7 @@ class TestMartingaleStopLoss:
             base_order_size=100.0,
             stop_loss_pct=5.0,  # 5% 止损
         )
-        symbol_picker = FakeSymbolPicker([])
+        symbol_picker = StaticListSymbolPicker([])
         strategy = MartingaleStrategy(exchange, config, symbol_picker)
 
         # 价格下跌 6%，触发止损
@@ -294,7 +285,7 @@ class TestMartingaleStopLoss:
         )
 
         config = MartingaleConfig(max_positions=1, stop_loss_pct=5.0)
-        symbol_picker = FakeSymbolPicker([])
+        symbol_picker = StaticListSymbolPicker([])
         strategy = MartingaleStrategy(exchange, config, symbol_picker)
 
         # 只下跌 4%，未到止损线
@@ -323,7 +314,7 @@ class TestMartingaleStopLoss:
             safety_order_step_scale=1.5,  # 1.5% 加仓
             stop_loss_pct=3.0,  # 3% 止损
         )
-        symbol_picker = FakeSymbolPicker([])
+        symbol_picker = StaticListSymbolPicker([])
         strategy = MartingaleStrategy(exchange, config, symbol_picker)
 
         # 价格下跌 4% - 既达到加仓线也达到止损线
@@ -354,7 +345,7 @@ class TestMartingaleStopLoss:
         )
 
         config = MartingaleConfig(max_positions=1, stop_loss_pct=3.0)
-        symbol_picker = FakeSymbolPicker([])
+        symbol_picker = StaticListSymbolPicker([])
         strategy = MartingaleStrategy(exchange, config, symbol_picker)
 
         # 价格相对于均价下跌 4%（达到止损线）

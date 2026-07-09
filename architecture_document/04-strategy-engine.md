@@ -22,7 +22,7 @@ classDiagram
 
     class ISymbolPicker {
         <<interface>>
-        +pick_symbols() list[str]
+        +pick() list[SymbolInfo]
     }
 
     class MartingaleStrategy {
@@ -49,20 +49,36 @@ classDiagram
         +min_volume: float
     }
 
-    class NewsServiceSymbolPicker {
-        +pick_symbols() list[str]
+    class StaticListSymbolPicker {
+        +pick() list[SymbolInfo]
+    }
+
+    class SimpleAlphaSymbolPicker {
+        +pick() list[SymbolInfo]
+    }
+
+    class MicroCapSymbolPicker {
+        +pick() list[SymbolInfo]
+    }
+
+    class ITechnicalAnalyzer {
+        <<interface>>
+        +detect_200sma_signal() CrossSignal | None
     }
 
     Strategy --> StrategyConfig
     Strategy --> ISymbolPicker
-    
+
     Strategy <|-- MartingaleStrategy
     Strategy <|-- MicroCapStrategy
-    
+
     StrategyConfig <|-- MartingaleConfig
     StrategyConfig <|-- MicroCapConfig
-    
-    ISymbolPicker <|-- NewsServiceSymbolPicker
+
+    ISymbolPicker <|-- StaticListSymbolPicker
+    ISymbolPicker <|-- SimpleAlphaSymbolPicker
+    ISymbolPicker <|-- MicroCapSymbolPicker
+    SimpleAlphaSymbolPicker --> ITechnicalAnalyzer : 注入
 ```
 
 ---
@@ -108,40 +124,106 @@ class Strategy(ABC):
 
 ## 3. 币种选择器
 
+> **模块位置**：`trading_service/pickers/`（统一存放所有选币器与技术分析器，禁止放在 `strategies/` 下，由架构契约测试 `tests/architecture/test_contracts.py` 强制守护）
+
 ### 3.1 ISymbolPicker 接口
 
 ```python
 class ISymbolPicker(ABC):
     @abstractmethod
-    async def pick_symbols(self, count: int) -> list[str]:
-        """选择符合策略条件的币种"""
+    async def pick(self) -> list[SymbolInfo]:
+        """筛选符合条件的币种，返回带市场数据与技术指标的 SymbolInfo 列表。"""
 ```
 
-### 3.2 实现说明
+**设计要点**：
+- `pick()` 为 **async** 方法，同步 IO 实现需用 `run_in_executor` 包装
+- 返回 `list[SymbolInfo]`（富数据载体），而非裸 `list[str]`
+- `SymbolInfo` 定义在 `pickers/symbol_picker.py`，包含基础字段、Alpha 扩展字段、技术分析字段三组
 
-当前实现通过 **News Service API** 获取：
-- 币种市值排名
-- 24h 成交量筛选
-- 涨跌幅过滤
-- 退市币种排除
+### 3.2 实现类
 
-**调用流程**：
+| 实现类 | 数据源 | 用途 |
+|--------|--------|------|
+| `StaticListSymbolPicker` | 静态字符串列表 | 测试 / DI 占位 |
+| `SimpleAlphaSymbolPicker` | 币安 Alpha 代币 API + 合约 K 线 | 真实选币，可选叠加技术分析 |
+| `MicroCapSymbolPicker` | news-service API（TODO） | 微市值策略选币（当前为 stub） |
+
+**SimpleAlphaSymbolPicker 筛选条件**：
+1. Alpha 代币，市值 5000 万 USDT 以下
+2. 在合约交易所存在且处于可交易状态（status=="TRADING", quoteAsset=="USDT"）
+3. 昨日 K 线为阳线（收盘价 >= 开盘价）
+4. [可选] 200 均线附近，底部横盘或刚突破（通过 `ITechnicalAnalyzer`）
+
+### 3.3 调用流程
+
 ```mermaid
 sequenceDiagram
     participant Strategy as Strategy
-    participant Picker as SymbolPicker
-    participant NS as News Service
+    participant Picker as SimpleAlphaSymbolPicker
+    participant Analyzer as ITechnicalAnalyzer
+    participant Binance as BinanceClient
 
-    Strategy->>Picker: pick_symbols(count=10)
-    Picker->>NS: GET /api/rankings?limit=50&min_volume=1000000
-    NS-->>Picker: 币种列表 (带市值、成交量、涨跌幅)
-    Picker->>Picker: 过滤微市值、排除退市
-    Picker-->>Strategy: [symbol...]
+    Strategy->>Picker: pick()
+    Picker->>Binance: get_alpha_tokens() + get_future_exchange_info()
+    Binance-->>Picker: Alpha 代币 + 可交易合约
+    Picker->>Picker: 取交集 + 市值过滤
+    Picker->>Binance: get_future_klines(symbol, "1d")
+    Binance-->>Picker: 昨日 K 线
+    Picker->>Picker: 阳线过滤
+    opt enable_technical_filter
+        Picker->>Binance: get_future_klines(symbol, interval, 210)
+        Binance-->>Picker: K 线序列
+        Picker->>Analyzer: detect_200sma_signal(klines)
+        Analyzer-->>Picker: CrossSignal | None
+    end
+    Picker-->>Strategy: list[SymbolInfo]
 ```
 
 ---
 
-## 4. 马丁格尔策略 (Martingale)
+## 4. 技术分析器
+
+### 4.1 ITechnicalAnalyzer 接口
+
+```python
+class ITechnicalAnalyzer(ABC):
+    @abstractmethod
+    def detect_200sma_signal(
+        self,
+        klines: list[BinanceFutureKline],
+        symbol: str,
+        check_last_n: int = 10,
+        near_threshold: float = 5.0,
+        sideways_threshold: float = 20.0,
+    ) -> CrossSignal | None:
+        """检测 200 均线穿越信号（金叉/死叉/靠近均线）。"""
+```
+
+**设计要点**：
+- 通过**依赖注入**提供给 `SimpleAlphaSymbolPicker`（构造函数 `analyzer` 参数），便于单元测试替换 mock
+- `TechnicalAnalyzer` 是默认实现，提供 SMA 计算、200 均线穿越信号检测、底部横盘判定
+- 所有计算方法无状态，可安全共享单例
+
+### 4.2 信号类型
+
+`CrossSignal` 数据结构：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `cross_type` | str | "golden"(金叉) / "dead"(死叉) / "near"(靠近均线) |
+| `cross_ago` | int | 多少根 K 线前发生的穿越（0 为刚发生） |
+| `sma_200` | float | 200 均线价格 |
+| `distance_percent` | float | 价格相对均线的距离百分比 |
+| `volatility_10` | float | 最近 10 根 K 线波动率 |
+| `is_sideways` | bool | 是否处于底部横盘 |
+
+### 4.3 优先级
+
+信号检测优先级：**金叉/死叉穿越 > 靠近均线**。无穿越且远离均线（距离 > near_threshold）时返回 `None`。
+
+---
+
+## 5. 马丁格尔策略 (Martingale)
 
 ### 4.1 策略原理
 
@@ -194,7 +276,7 @@ breakeven_price = Σ(price_i * size_i) / total_size
 
 ---
 
-## 5. 微市值策略 (MicroCap)
+## 6. 微市值策略 (MicroCap)
 
 ### 5.1 策略原理
 
@@ -237,7 +319,7 @@ graph TD
 
 ---
 
-## 6. 策略执行流程
+## 7. 策略执行流程
 
 ### 6.1 通用执行流程
 
@@ -274,7 +356,7 @@ flowchart TB
 
 ---
 
-## 7. 策略状态报告
+## 8. 策略状态报告
 
 每个策略必须实现 `get_status()` 方法，返回结构化状态信息。
 
@@ -300,7 +382,7 @@ flowchart TB
 
 ---
 
-## 8. 策略扩展指南
+## 9. 策略扩展指南
 
 ### 8.1 新增策略步骤
 
@@ -343,7 +425,7 @@ class MyStrategy(Strategy):
 
 ---
 
-## 9. 测试策略
+## 10. 测试策略
 
 ### 9.1 单元测试要点
 
@@ -369,7 +451,7 @@ class MyStrategy(Strategy):
 
 ---
 
-## 10. 风险控制设计
+## 11. 风险控制设计
 
 ### 10.1 内置风控机制
 
