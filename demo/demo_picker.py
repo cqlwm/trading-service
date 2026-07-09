@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -75,7 +76,7 @@ def print_results(results: list[SymbolInfo], duration: float) -> None:
           f"{sum(r.yesterday_change_percent for r in results) / len(results):.2f}%")
 
 
-def main() -> None:
+async def main() -> None:
     """主函数。"""
     setup_logging()
     print_header()
@@ -84,7 +85,7 @@ def main() -> None:
 
     with BinanceClient(timeout=30) as client:
         picker = SimpleAlphaSymbolPicker(client=client)
-        results = picker.pick()
+        results = await picker.pick()
 
     duration = time.time() - start_time
     print()
@@ -92,4 +93,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

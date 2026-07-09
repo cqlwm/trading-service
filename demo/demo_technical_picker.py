@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import time
 
@@ -123,7 +124,7 @@ def print_results(results: list[SymbolInfo], duration: float, interval: str) -> 
     print("  3. 小市值代币波动大，注意仓位管理")
 
 
-def main() -> None:
+async def main() -> None:
     """主函数。"""
     parser = argparse.ArgumentParser(description="Alpha技术分析选币器")
     parser.add_argument(
@@ -146,7 +147,7 @@ def main() -> None:
             enable_technical_filter=True,
             kline_interval=args.interval,
         )
-        results = picker.pick()
+        results = await picker.pick()
 
     duration = time.time() - start_time
     print()
@@ -154,4 +155,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
