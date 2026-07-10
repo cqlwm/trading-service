@@ -28,6 +28,12 @@ trading_service/
 ├── exchange.py        # Mock交易所实现
 └── config.py
 
+demo/                   # 展示/运维脚本（不进 pyright/测试）
+├── demo_picker.py               # 基础选币演示
+├── demo_technical_picker.py     # 技术分析选币（含下架预警展示）
+├── demo_backtest.py             # 止盈率回测（资金约束，日级调度）
+└── demo_take_profit.py          # 为真实持仓批量下限价止盈单（ccxt鉴权，真实资金）
+
 # -----------------------
 # 🔗 接口契约（CRITICAL!）
 # -----------------------
@@ -95,6 +101,25 @@ class SymbolInfo:
     回测的绝对盈亏不可信，只有相对结论（TP之间比较）有参考价值。
 12. ⚠️ 回测资金约束：simulate_portfolio 按100U/10仓约束，止盈释放资金可复用，
     下架不释放。同一代币可叠加加仓。不要用 simulate_trade 做资金约束回测！
+
+# -----------------------
+# 📈 币安合约下单陷阱（真实资金操作！踩过3个坑）
+# -----------------------
+13. ⚠️ BinanceClient 是纯只读市场数据客户端，无 apiKey/secret、无下单能力。
+    真实下单用独立 demo 脚本（demo/demo_take_profit.py）+ ccxt 鉴权实例，
+    不要把交易能力混进 BinanceClient！
+14. ⚠️ 双向持仓模式(hedge mode)的3个连环坑（账户开了多空双开）：
+    a) fetch_positions 返回 ccxt 统一格式 symbol（如 PUMPBTC/USDT:USDT），
+       不是币安原生格式（PUMPBTCUSDT）。过滤/比较时要归一化去 / 和 :。
+    b) 下单必须传 positionSide（LONG/SHORT），否则报 -4061。
+       从 position.info.positionSide 取，单向模式是 BOTH，双向是 LONG/SHORT。
+    c) reduceOnly 和 positionSide(非BOTH) 互斥！双向模式传 reduceOnly 报 -1106。
+       规则：positionSide==BOTH 时才传 reduceOnly，双向模式靠 positionSide 定向。
+15. ⚠️ 币安合约订单类型区别（USDT-M futures）：
+    - LIMIT: 普通限价单，直接挂订单簿，price+amount+timeInForce。无触发条件。
+      多头止盈价已低于市价时会立即成交（非真正的"等触发"）。
+    - TAKE_PROFIT: 限价条件止盈单，stopPrice(触发)+price(限价)+amount。先触发才挂单。
+    - TAKE_PROFIT_MARKET: 市价条件止盈单，stopPrice+closePosition(整仓)。
 
 # -----------------------
 # 📝 命名约定
