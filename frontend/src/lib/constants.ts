@@ -17,6 +17,8 @@ export const ENDPOINTS = {
   story: (symbol: string) => `/story/${symbol}`,
   martingaleExecute: '/strategies/martingale/execute',
   martingaleStatus: '/strategies/martingale/status',
+  martingaleShortExecute: '/strategies/martingale-short/execute',
+  martingaleShortStatus: '/strategies/martingale-short/status',
   microCapExecute: '/strategies/micro-cap/execute',
   microCapStatus: '/strategies/micro-cap/status',
   microCapHistory: '/strategies/micro-cap/history',

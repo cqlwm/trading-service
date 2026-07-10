@@ -30,14 +30,17 @@ export function useClosePosition() {
   })
 }
 
-/** 执行策略 -- 通用 mutation，支持 martingale / micro-cap */
-export function useExecuteStrategy(strategy: 'martingale' | 'micro-cap') {
+/** 执行策略 -- 通用 mutation，支持 martingale / micro-cap / martingale-short */
+export function useExecuteStrategy(strategy: 'martingale' | 'micro-cap' | 'martingale-short') {
   const qc = useQueryClient()
   const endpoint =
     strategy === 'martingale'
       ? ENDPOINTS.martingaleExecute
-      : ENDPOINTS.microCapExecute
-  const label = strategy === 'martingale' ? '马丁' : '微市值'
+      : strategy === 'martingale-short'
+        ? ENDPOINTS.martingaleShortExecute
+        : ENDPOINTS.microCapExecute
+  const label =
+    strategy === 'martingale' ? '马丁' : strategy === 'martingale-short' ? '马丁做空' : '微市值'
 
   return useMutation<StrategyExecuteResponse, Error>({
     mutationFn: () => apiPost<StrategyExecuteResponse>(endpoint),

@@ -4,7 +4,7 @@ from typing import Any
 from trading_service.exchange import MockExchange, Position
 from trading_service.strategies.base import Strategy, StrategyAction, StrategyConfig
 from trading_service.pickers import ISymbolPicker
-from trading_service.types import TradeDirection, OrderType
+from trading_service.types import OrderType, TradeDirection
 
 
 from dataclasses import dataclass
@@ -20,6 +20,7 @@ class MartingaleConfig(StrategyConfig):
     safety_order_volume_scale: float = 2.0
     take_profit_pct: float = 1.5
     stop_loss_pct: float = 20.0
+    direction: TradeDirection = TradeDirection.LONG
 
 
 class MartingaleStrategy(Strategy):
@@ -44,7 +45,7 @@ class MartingaleStrategy(Strategy):
         返回执行的动作列表。
         """
         actions: list[StrategyAction] = []
-        positions = self.exchange.get_positions(tag="martingale", status="open")
+        positions = self.exchange.get_positions(tag=self.name, status="open")
         current_position_count = len(positions)
 
         if positions:
@@ -107,7 +108,7 @@ class MartingaleStrategy(Strategy):
         """开新仓位逻辑。"""
         actions: list[StrategyAction] = []
         symbol_infos = await self.symbol_picker.pick()
-        positions = self.exchange.get_positions(tag="martingale", status="open")
+        positions = self.exchange.get_positions(tag=self.name, status="open")
         occupied_symbols = {p.symbol for p in positions}
         available_infos = [s for s in symbol_infos if s.symbol not in occupied_symbols]
 
@@ -124,11 +125,11 @@ class MartingaleStrategy(Strategy):
             if price > 0:
                 self.exchange.open_position(
                     symbol=info.symbol,
-                    direction=TradeDirection.LONG,
+                    direction=self.config.direction,
                     size=self.config.base_order_size,
                     price=price,
-                    tag="martingale",
-                    reason="martingale_initial_entry",
+                    tag=self.name,
+                    reason=f"{self.name}_initial_entry",
                 )
                 actions.append(StrategyAction(
                     type="open",
@@ -138,7 +139,11 @@ class MartingaleStrategy(Strategy):
         return actions
 
     def _check_and_add(self, position: Position, current_price: float) -> StrategyAction | None:
-        """检查是否应该加仓，如果需要则执行加仓。返回动作记录或 None。"""
+        """检查是否应该加仓，如果需要则执行加仓。返回动作记录或 None。
+
+        做多：价格下跌到 entry*(1-drop_pct) 以下时加仓（跌幅加仓）。
+        做空：价格上涨到 entry*(1+rise_pct) 以上时加仓（涨幅加仓）。
+        """
         add_orders = [o for o in position.orders if o.order_type == OrderType.ADD]
         add_count = len(add_orders)
 
@@ -146,17 +151,25 @@ class MartingaleStrategy(Strategy):
             return None
 
         add_target_count = add_count + 1
-        drop_pct = self.config.safety_order_step_scale * add_target_count / 100
-        trigger_price = position.entry_price * (1 - drop_pct)
+        step_pct = self.config.safety_order_step_scale * add_target_count / 100
 
-        if current_price <= trigger_price:
+        if self.config.direction == TradeDirection.LONG:
+            # 做多：价格下跌触发加仓
+            trigger_price = position.entry_price * (1 - step_pct)
+            should_add = current_price <= trigger_price
+        else:
+            # 做空：价格上涨触发加仓
+            trigger_price = position.entry_price * (1 + step_pct)
+            should_add = current_price >= trigger_price
+
+        if should_add:
             add_size = self.config.base_order_size * (self.config.safety_order_volume_scale ** (add_count + 1))
 
             self.exchange.add_position(
                 position_id=position.id,
                 size=add_size,
                 price=current_price,
-                reason=f"safety_order_{add_target_count}",
+                reason=f"{self.name}_safety_order_{add_target_count}",
             )
             return StrategyAction(
                 type="add",
@@ -167,7 +180,7 @@ class MartingaleStrategy(Strategy):
 
     def get_status(self) -> dict[str, Any]:
         """获取策略状态。"""
-        positions = self.exchange.get_positions(tag="martingale")
+        positions = self.exchange.get_positions(tag=self.name)
         return {
             "config": {
                 "max_positions": self.config.max_positions,

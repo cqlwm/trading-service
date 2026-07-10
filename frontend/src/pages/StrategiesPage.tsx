@@ -13,6 +13,7 @@ import {
 } from '@/hooks/useMutations'
 import {
   useMartingaleStatus,
+  useMartingaleShortStatus,
   useMicroCapStatus,
   useMicroCapHistory,
   useStrategyExecutions,
@@ -91,9 +92,11 @@ function ExecutionHistory({ name }: { name: string }) {
 
 export function StrategiesPage() {
   const martingale = useMartingaleStatus()
+  const martingaleShort = useMartingaleShortStatus()
   const microCap = useMicroCapStatus()
   const history = useMicroCapHistory(20)
   const executeMartingale = useExecuteStrategy('martingale')
+  const executeMartingaleShort = useExecuteStrategy('martingale-short')
   const executeMicroCap = useExecuteStrategy('micro-cap')
   const startSchedule = useStartStrategySchedule()
   const stopSchedule = useStopStrategySchedule()
@@ -111,11 +114,11 @@ export function StrategiesPage() {
         }
       />
       <div className="space-y-6 px-6 pb-6">
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-3">
           {/* 马丁策略 */}
           <StrategyCard
             title="马丁格尔"
-            description="马丁格尔加仓策略"
+            description="马丁格尔做多策略"
             isLoading={martingale.isLoading}
             isExecuting={executeMartingale.isPending}
             onExecute={() => executeMartingale.mutate()}
@@ -139,6 +142,37 @@ export function StrategiesPage() {
               {
                 label: '加仓倍数',
                 value: `${martingale.data?.config.safety_order_volume_scale ?? 0}x`,
+              },
+            ]}
+          />
+
+          {/* 马丁做空策略 */}
+          <StrategyCard
+            title="马丁做空"
+            description="涨幅榜选币 + 做空马丁策略"
+            isLoading={martingaleShort.isLoading}
+            isExecuting={executeMartingaleShort.isPending}
+            onExecute={() => executeMartingaleShort.mutate()}
+            schedule={martingaleShort.data?.schedule}
+            isStarting={startSchedule.isPending}
+            isStopping={stopSchedule.isPending}
+            onStart={() => startSchedule.mutate('martingale_short')}
+            onStop={() => stopSchedule.mutate('martingale_short')}
+            openPositions={martingaleShort.data?.open_positions ?? 0}
+            totalPositions={martingaleShort.data?.total_positions ?? 0}
+            maxPositions={martingaleShort.data?.config.max_positions ?? 0}
+            configItems={[
+              { label: '基础订单', value: `$${martingaleShort.data?.config.base_order_size ?? 0}` },
+              { label: '安全单数', value: martingaleShort.data?.config.safety_order_count ?? 0 },
+              { label: '止盈 (%)', value: `${martingaleShort.data?.config.take_profit_pct ?? 0}%` },
+              { label: '止损 (%)', value: `${martingaleShort.data?.config.stop_loss_pct ?? 0}%` },
+              {
+                label: '加仓步长',
+                value: `${martingaleShort.data?.config.safety_order_step_scale ?? 0}x`,
+              },
+              {
+                label: '加仓倍数',
+                value: `${martingaleShort.data?.config.safety_order_volume_scale ?? 0}x`,
               },
             ]}
           />
@@ -178,8 +212,9 @@ export function StrategiesPage() {
         </div>
 
         {/* 执行历史 */}
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-3">
           <ExecutionHistory name="martingale" />
+          <ExecutionHistory name="martingale_short" />
           <ExecutionHistory name="micro_cap" />
         </div>
 

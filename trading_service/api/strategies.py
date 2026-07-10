@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from trading_service.api.deps import MartingaleDep, MicroCapDep, SchedulerDep
+from trading_service.api.deps import MartingaleDep, MartingaleShortDep, MicroCapDep, SchedulerDep
 
 router = APIRouter(tags=["strategies"])
 
@@ -72,6 +72,31 @@ async def get_micro_cap_history(
 ) -> list[dict[str, Any]]:
     """查看微市值策略历史记录。"""
     return strategy.get_history(limit=limit)
+
+
+@router.post("/martingale-short/execute")
+async def execute_martingale_short(
+    strategy: MartingaleShortDep,
+) -> dict[str, Any]:
+    """执行马丁做空策略。"""
+    actions = await strategy.execute()
+    return {
+        "status": "ok",
+        "strategy": "martingale_short",
+        "actions": _format_actions(actions),
+        "action_count": len(actions),
+    }
+
+
+@router.get("/martingale-short/status")
+async def get_martingale_short_status(
+    strategy: MartingaleShortDep,
+    scheduler: SchedulerDep,
+) -> dict[str, Any]:
+    """查看马丁做空策略状态（含调度信息）。"""
+    status = strategy.get_status()
+    status["schedule"] = scheduler.get_strategy_schedule("martingale_short")
+    return status
 
 
 # ---- 调度控制 ----

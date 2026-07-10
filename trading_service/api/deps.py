@@ -9,15 +9,19 @@ from trading_service.exchange import MockExchange
 from trading_service.pickers import (
     AlphaTokenSource,
     SelectionPipeline,
+    ShortSignalFilter,
     StaticListSymbolPicker,
     TechnicalAnalysisFilter,
     TechnicalAnalyzer,
+    TopGainersSource,
 )
 from trading_service.repository import SqlalchemyTradingStore
 from trading_service.scheduler import StrategyScheduler
 from trading_service.strategies.martingale import MartingaleConfig, MartingaleStrategy
+from trading_service.strategies.martingale_short import MartingaleShortStrategy
 from trading_service.strategies.micro_cap import MicroCapConfig, MicroCapStrategy
 from trading_service.clients import BinanceClient
+from trading_service.types import TradeDirection
 from trading_service.utils.symbol import Symbol
 
 # 全局单例
@@ -47,10 +51,33 @@ _micro_cap_strategy = MicroCapStrategy(
         ],
     ),
 )
+# 马丁做空：涨幅榜选币 -> 技术分析增强 -> 做空信号过滤 -> 做空马丁策略
+_martingale_short_strategy = MartingaleShortStrategy(
+    exchange=_exchange,
+    config=MartingaleConfig(
+        direction=TradeDirection.SHORT,
+        max_positions=5,
+        base_order_size=50.0,
+        safety_order_count=3,
+        take_profit_pct=2.0,
+        stop_loss_pct=15.0,
+    ),
+    symbol_picker=SelectionPipeline(
+        source=TopGainersSource(client=_micro_cap_client, top_n=20),
+        filters=[
+            TechnicalAnalysisFilter(
+                analyzer=TechnicalAnalyzer(),
+                client=_micro_cap_client,
+                kline_interval="4h",
+            ),
+            ShortSignalFilter(overbought_threshold=15.0),
+        ],
+    ),
+)
 # 统一策略调度器（管理所有策略的定时执行）
 _strategy_scheduler = StrategyScheduler(
     repo=_trading_store,
-    strategies=[_martingale_strategy, _micro_cap_strategy],
+    strategies=[_martingale_strategy, _micro_cap_strategy, _martingale_short_strategy],
 )
 
 
@@ -69,6 +96,11 @@ async def get_micro_cap_strategy() -> MicroCapStrategy:
     return _micro_cap_strategy
 
 
+async def get_martingale_short_strategy() -> MartingaleShortStrategy:
+    """获取马丁做空策略实例。"""
+    return _martingale_short_strategy
+
+
 def get_strategy_scheduler() -> StrategyScheduler:
     """获取策略调度器实例。"""
     return _strategy_scheduler
@@ -77,4 +109,5 @@ def get_strategy_scheduler() -> StrategyScheduler:
 ExchangeDep = Annotated[MockExchange, Depends(get_exchange)]
 MartingaleDep = Annotated[MartingaleStrategy, Depends(get_martingale_strategy)]
 MicroCapDep = Annotated[MicroCapStrategy, Depends(get_micro_cap_strategy)]
+MartingaleShortDep = Annotated[MartingaleShortStrategy, Depends(get_martingale_short_strategy)]
 SchedulerDep = Annotated[StrategyScheduler, Depends(get_strategy_scheduler)]

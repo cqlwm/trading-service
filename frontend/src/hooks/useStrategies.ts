@@ -18,6 +18,15 @@ export function useMartingaleStatus() {
   })
 }
 
+/** 马丁做空策略状态 */
+export function useMartingaleShortStatus() {
+  return useQuery<MartingaleStatus>({
+    queryKey: ['strategy-status', 'martingale-short'],
+    queryFn: () => apiGet<MartingaleStatus>(ENDPOINTS.martingaleShortStatus),
+    refetchInterval: POLL_INTERVAL,
+  })
+}
+
 /** 微市值策略状态 */
 export function useMicroCapStatus() {
   return useQuery<MicroCapStatus>({

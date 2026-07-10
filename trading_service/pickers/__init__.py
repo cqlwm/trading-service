@@ -19,6 +19,7 @@ from trading_service.pickers.backtest import (
     summarize,
 )
 from trading_service.pickers.signal import is_delisting_soon, is_notable_signal
+from trading_service.pickers.short_signal_filter import ShortSignalFilter
 from trading_service.pickers.symbol_picker import (
     PERPETUAL_DELIVERY_SENTINEL,
     AlphaTokenSource,
@@ -29,6 +30,7 @@ from trading_service.pickers.technical_analyzer import (
     TechnicalAnalyzer,
 )
 from trading_service.pickers.technical_filter import TechnicalAnalysisFilter
+from trading_service.pickers.top_gainers_source import TopGainersSource
 
 __all__ = [
     # 核心契约（策略层依赖）
@@ -41,11 +43,14 @@ __all__ = [
     "SelectionPipeline",
     # 数据源实现
     "AlphaTokenSource",
+    "TopGainersSource",
     # 技术分析
     "ITechnicalAnalyzer",
     "TechnicalAnalyzer",
     "TechnicalAnalysisFilter",
     "CrossSignal",
+    # 过滤器实现
+    "ShortSignalFilter",
     # 技术信号判定（展示层/策略层按需过滤）
     "is_notable_signal",
     "is_delisting_soon",

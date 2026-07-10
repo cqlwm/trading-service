@@ -305,6 +305,7 @@ class MockExchange:
         统一按 binance 原生格式作为 key 返回（与 DB 存储、策略层一致）。
 
         通过 ccxt 调用 Binance 现货公开 ticker 接口，无需 API Key。
+        部分合约独有符号在现货市场不存在时，该符号价格返回 0.0。
         """
         if not symbols:
             return {}
@@ -315,21 +316,22 @@ class MockExchange:
             sym = Symbol.parse(s)
             normalized[sym.binance()] = sym.ccxt()
 
-        ccxt_symbols = list(normalized.values())
         exchange = ccxt.binance({"enableRateLimit": True, "timeout": 15000})
 
         prices: dict[str, float] = {}
         try:
-            tickers = exchange.fetch_tickers(ccxt_symbols)
+            # 获取全部现货 ticker，然后按需取值。
+            # 不用 fetch_tickers(specific_symbols) 是因为传入不存在的符号会整体抛异常。
+            all_tickers = exchange.fetch_tickers()
             for binance_sym, ccxt_sym in normalized.items():
-                ticker = tickers.get(ccxt_sym)
+                ticker = all_tickers.get(ccxt_sym)
                 if ticker and ticker.get("last") is not None:
                     prices[binance_sym] = float(ticker["last"])
                 else:
                     prices[binance_sym] = 0.0
+                    logger.debug(f"fetch_prices: {ccxt_sym} 在现货市场不存在，返回 0")
         except Exception as e:
-            logger.warning(f"fetch_prices failed, falling back to entry prices: {e}")
-            # 失败时返回 0.0，调用方需自行容错
+            logger.warning(f"fetch_prices failed, falling back to 0: {e}")
             for binance_sym in normalized:
                 prices[binance_sym] = 0.0
         finally:
