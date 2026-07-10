@@ -2,7 +2,12 @@ import { useQuery } from '@tanstack/react-query'
 
 import { apiGet } from '@/api/client'
 import { ENDPOINTS, POLL_INTERVAL } from '@/lib/constants'
-import type { MartingaleStatus, MicroCapHistoryItem, MicroCapStatus } from '@/types'
+import type {
+  MartingaleStatus,
+  MicroCapHistoryItem,
+  MicroCapStatus,
+  StrategyExecution,
+} from '@/types'
 
 /** 马丁策略状态 */
 export function useMartingaleStatus() {
@@ -30,5 +35,19 @@ export function useMicroCapHistory(limit = 20) {
       apiGet<MicroCapHistoryItem[]>(
         `${ENDPOINTS.microCapHistory}?limit=${limit}`,
       ),
+  })
+}
+
+/** 策略执行历史 */
+export function useStrategyExecutions(name: string, limit = 10) {
+  return useQuery<StrategyExecution[]>({
+    queryKey: ['strategy-executions', name, limit],
+    queryFn: async () => {
+      const resp = await apiGet<{ data: StrategyExecution[]; total: number }>(
+        `${ENDPOINTS.strategyExecutions(name)}?limit=${limit}`,
+      )
+      return resp.data
+    },
+    refetchInterval: POLL_INTERVAL,
   })
 }

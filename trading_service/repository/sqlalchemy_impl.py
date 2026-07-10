@@ -8,8 +8,21 @@ from datetime import datetime, timezone
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
-from trading_service.repository.abc import OrderRecord, PositionRecord, SignalRecord, TradingRepository
-from trading_service.repository.models import OrderModel, PositionModel, SignalModel
+from trading_service.repository.abc import (
+    OrderRecord,
+    PositionRecord,
+    SignalRecord,
+    StrategyExecutionRecord,
+    StrategyScheduleRecord,
+    TradingRepository,
+)
+from trading_service.repository.models import (
+    OrderModel,
+    PositionModel,
+    SignalModel,
+    StrategyExecutionModel,
+    StrategyScheduleModel,
+)
 
 
 class SqlalchemyTradingStore(TradingRepository):
@@ -292,6 +305,100 @@ class SqlalchemyTradingStore(TradingRepository):
             metadata_json=model.metadata_json or {},
             created_at=self._str_to_dt(model.created_at),
         )
+
+    # ---- 策略调度 ----
+
+    def save_schedule(self, schedule: StrategyScheduleRecord) -> None:
+        with Session(self.engine) as session:
+            existing = session.get(StrategyScheduleModel, schedule.strategy_name)
+            now = self._dt_to_str(datetime.now(timezone.utc))
+            if existing:
+                existing.cron = schedule.cron
+                existing.enabled = schedule.enabled
+                existing.updated_at = now
+            else:
+                model = StrategyScheduleModel(
+                    strategy_name=schedule.strategy_name,
+                    cron=schedule.cron,
+                    enabled=schedule.enabled,
+                    created_at=self._dt_to_str(schedule.created_at),
+                    updated_at=now,
+                )
+                session.add(model)
+            session.commit()
+
+    def get_schedule(self, strategy_name: str) -> StrategyScheduleRecord | None:
+        with Session(self.engine) as session:
+            model = session.get(StrategyScheduleModel, strategy_name)
+            if model is None:
+                return None
+            return StrategyScheduleRecord(
+                strategy_name=model.strategy_name,
+                cron=model.cron,
+                enabled=model.enabled,
+                created_at=self._str_to_dt(model.created_at),
+                updated_at=self._str_to_dt(model.updated_at),
+            )
+
+    def list_schedules(self) -> list[StrategyScheduleRecord]:
+        with Session(self.engine) as session:
+            result = session.execute(select(StrategyScheduleModel))
+            models = result.scalars().all()
+            return [
+                StrategyScheduleRecord(
+                    strategy_name=m.strategy_name,
+                    cron=m.cron,
+                    enabled=m.enabled,
+                    created_at=self._str_to_dt(m.created_at),
+                    updated_at=self._str_to_dt(m.updated_at),
+                )
+                for m in models
+            ]
+
+    def save_execution(self, execution: StrategyExecutionRecord) -> None:
+        with Session(self.engine) as session:
+            model = StrategyExecutionModel(
+                id=execution.id,
+                strategy_name=execution.strategy_name,
+                started_at=self._dt_to_str(execution.started_at),
+                finished_at=self._dt_to_str(execution.finished_at) if execution.finished_at else None,
+                success=execution.success,
+                action_count=execution.action_count,
+                actions_json=json.dumps(execution.actions_json),
+                error=execution.error,
+            )
+            session.add(model)
+            session.commit()
+
+    def list_executions(
+        self,
+        strategy_name: str,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[StrategyExecutionRecord]:
+        with Session(self.engine) as session:
+            query = (
+                select(StrategyExecutionModel)
+                .where(StrategyExecutionModel.strategy_name == strategy_name)
+                .order_by(StrategyExecutionModel.started_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            result = session.execute(query)
+            models = result.scalars().all()
+            return [
+                StrategyExecutionRecord(
+                    id=m.id,
+                    strategy_name=m.strategy_name,
+                    started_at=self._str_to_dt(m.started_at),
+                    finished_at=self._str_to_dt(m.finished_at) if m.finished_at else None,
+                    success=m.success,
+                    action_count=m.action_count,
+                    actions_json=json.loads(m.actions_json) if m.actions_json else [],
+                    error=m.error,
+                )
+                for m in models
+            ]
 
     def begin(self) -> None:
         """开始事务（SQLAlchemy 是隐式的，这里占位）。"""

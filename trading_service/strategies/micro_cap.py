@@ -28,6 +28,9 @@ class MicroCapStrategy(Strategy):
     入场：技术分析显示横盘或近期突破（金叉）时，买入 position_size_usdt。
     """
 
+    name = "micro_cap"
+    cron = "0 * * * * *"  # 6字段：秒 分 时 日 月 周 = 每分钟
+
     def __init__(
         self,
         exchange: MockExchange,

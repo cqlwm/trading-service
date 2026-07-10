@@ -1,10 +1,70 @@
 import type { ReactNode } from 'react'
-import { Play } from 'lucide-react'
+import { Clock, Play, Square } from 'lucide-react'
 
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { cn } from '@/lib/cn'
+import { formatRelative } from '@/lib/format'
+import type { StrategySchedule } from '@/types'
+
+/** 调度状态指示器 */
+function ScheduleStatus({ schedule }: { schedule: StrategySchedule | null | undefined }) {
+  if (!schedule) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <span className="h-2 w-2 rounded-full bg-muted-foreground" />
+        未配置调度
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      {/* 运行状态灯 */}
+      <div className="flex items-center gap-2">
+        <span
+          className={cn(
+            'relative flex h-2.5 w-2.5',
+          )}
+        >
+          {schedule.running && (
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
+          )}
+          <span
+            className={cn(
+              'relative inline-flex h-2.5 w-2.5 rounded-full',
+              schedule.running ? 'bg-success' : 'bg-muted-foreground',
+            )}
+          />
+        </span>
+        <span className={cn('text-sm font-medium', schedule.running ? 'text-success' : 'text-muted-foreground')}>
+          {schedule.running ? '运行中' : '已停止'}
+        </span>
+      </div>
+
+      {/* cron 表达式 */}
+      <Badge variant="outline" className="font-mono text-xs">
+        {schedule.cron}
+      </Badge>
+
+      {/* 下次执行时间 */}
+      {schedule.running && schedule.next_run_at && (
+        <span className="text-xs text-muted-foreground">
+          下次: {formatRelative(schedule.next_run_at)}
+        </span>
+      )}
+
+      {/* 上次执行时间 */}
+      {schedule.last_run_at && (
+        <span className="text-xs text-muted-foreground">
+          上次: {formatRelative(schedule.last_run_at)}
+        </span>
+      )}
+    </div>
+  )
+}
 
 /** 配置项展示 */
 function ConfigItem({ label, value }: { label: string; value: ReactNode }) {
@@ -17,8 +77,7 @@ function ConfigItem({ label, value }: { label: string; value: ReactNode }) {
 }
 
 /**
- * 策略卡片 -- 展示配置、持仓统计、执行按钮。
- * 通用组件，马丁和微市值共用。
+ * 策略卡片 -- 展示调度状态、配置、持仓统计、执行/启停按钮。
  */
 export function StrategyCard({
   title,
@@ -30,6 +89,11 @@ export function StrategyCard({
   isLoading,
   isExecuting,
   onExecute,
+  schedule,
+  isStarting,
+  isStopping,
+  onStart,
+  onStop,
   children,
 }: {
   title: string
@@ -41,8 +105,15 @@ export function StrategyCard({
   isLoading: boolean
   isExecuting: boolean
   onExecute: () => void
+  schedule: StrategySchedule | null | undefined
+  isStarting: boolean
+  isStopping: boolean
+  onStart: () => void
+  onStop: () => void
   children?: ReactNode
 }) {
+  const running = schedule?.running ?? false
+
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between">
@@ -50,16 +121,50 @@ export function StrategyCard({
           <CardTitle className="text-base font-semibold text-foreground">{title}</CardTitle>
           <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
         </div>
-        <Button
-          size="sm"
-          onClick={onExecute}
-          disabled={isExecuting}
-        >
-          <Play size={14} />
-          {isExecuting ? '执行中...' : '执行策略'}
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* 启停按钮 */}
+          {running ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={isStopping}
+              onClick={onStop}
+            >
+              <Square size={14} />
+              {isStopping ? '停止中...' : '停止'}
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={isStarting}
+              onClick={onStart}
+            >
+              <Play size={14} />
+              {isStarting ? '启动中...' : '启动'}
+            </Button>
+          )}
+          {/* 手动执行 */}
+          <Button
+            size="sm"
+            onClick={onExecute}
+            disabled={isExecuting}
+          >
+            <Clock size={14} />
+            {isExecuting ? '执行中...' : '立即执行'}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* 调度状态 */}
+        <div className="rounded-md border border-border p-3">
+          {isLoading ? (
+            <Skeleton className="h-6" />
+          ) : (
+            <ScheduleStatus schedule={schedule} />
+          )}
+        </div>
+
         {/* 持仓统计 */}
         {isLoading ? (
           <Skeleton className="h-12" />

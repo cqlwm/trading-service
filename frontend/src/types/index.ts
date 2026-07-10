@@ -144,7 +144,28 @@ export interface TimelineEvent {
 
 /* ==================== 策略 ==================== */
 
-/** 马丁策略状态 —— GET /api/strategies/martingale/status */
+/** 策略调度状态 */
+export interface StrategySchedule {
+  strategy_name: string
+  running: boolean
+  cron: string
+  next_run_at: string | null
+  last_run_at: string | null
+}
+
+/** 策略执行历史记录 */
+export interface StrategyExecution {
+  id: string
+  strategy_name: string
+  started_at: string
+  finished_at: string | null
+  success: boolean
+  action_count: number
+  actions: StrategyAction[]
+  error: string | null
+}
+
+/** 马丁策略状态 -- GET /api/strategies/martingale/status */
 export interface MartingaleStatus {
   config: {
     max_positions: number
@@ -157,9 +178,10 @@ export interface MartingaleStatus {
   }
   open_positions: number
   total_positions: number
+  schedule: StrategySchedule | null
 }
 
-/** 微市值策略状态 —— GET /api/strategies/micro-cap/status */
+/** 微市值策略状态 -- GET /api/strategies/micro-cap/status */
 export interface MicroCapStatus {
   config: {
     max_positions: number
@@ -171,6 +193,7 @@ export interface MicroCapStatus {
   }
   open_positions: number
   total_positions: number
+  schedule: StrategySchedule | null
 }
 
 /** 策略执行动作 */

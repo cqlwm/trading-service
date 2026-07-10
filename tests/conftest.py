@@ -10,6 +10,8 @@ from trading_service.repository import (
     OrderRecord,
     PositionRecord,
     SignalRecord,
+    StrategyExecutionRecord,
+    StrategyScheduleRecord,
     TradingRepository,
 )
 
@@ -213,6 +215,43 @@ class InMemoryTradingRepository(TradingRepository):
         if severity_min:
             results = [r for r in results if r.severity >= severity_min]
         return len(results)
+
+    # ---- 策略调度 ----
+
+    def __post_init_storage(self) -> None:
+        if not hasattr(self, "schedules"):
+            self.schedules: dict[str, StrategyScheduleRecord] = {}
+        if not hasattr(self, "executions"):
+            self.executions: dict[str, StrategyExecutionRecord] = {}
+
+    def save_schedule(self, schedule: StrategyScheduleRecord) -> None:
+        self.__post_init_storage()
+        self.schedules[schedule.strategy_name] = schedule
+
+    def get_schedule(self, strategy_name: str) -> StrategyScheduleRecord | None:
+        self.__post_init_storage()
+        return self.schedules.get(strategy_name)
+
+    def list_schedules(self) -> list[StrategyScheduleRecord]:
+        self.__post_init_storage()
+        return list(self.schedules.values())
+
+    def save_execution(self, execution: StrategyExecutionRecord) -> None:
+        self.__post_init_storage()
+        self.executions[execution.id] = execution
+
+    def list_executions(
+        self,
+        strategy_name: str,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[StrategyExecutionRecord]:
+        self.__post_init_storage()
+        results = [
+            e for e in self.executions.values() if e.strategy_name == strategy_name
+        ]
+        results.sort(key=lambda e: e.started_at, reverse=True)
+        return results[offset:offset + limit]
 
 
 @pytest.fixture

@@ -14,6 +14,7 @@ from trading_service.pickers import (
     TechnicalAnalyzer,
 )
 from trading_service.repository import SqlalchemyTradingStore
+from trading_service.scheduler import StrategyScheduler
 from trading_service.strategies.martingale import MartingaleConfig, MartingaleStrategy
 from trading_service.strategies.micro_cap import MicroCapConfig, MicroCapStrategy
 from trading_service.clients import BinanceClient
@@ -46,6 +47,11 @@ _micro_cap_strategy = MicroCapStrategy(
         ],
     ),
 )
+# 统一策略调度器（管理所有策略的定时执行）
+_strategy_scheduler = StrategyScheduler(
+    repo=_trading_store,
+    strategies=[_martingale_strategy, _micro_cap_strategy],
+)
 
 
 async def get_exchange() -> MockExchange:
@@ -63,6 +69,12 @@ async def get_micro_cap_strategy() -> MicroCapStrategy:
     return _micro_cap_strategy
 
 
+def get_strategy_scheduler() -> StrategyScheduler:
+    """获取策略调度器实例。"""
+    return _strategy_scheduler
+
+
 ExchangeDep = Annotated[MockExchange, Depends(get_exchange)]
 MartingaleDep = Annotated[MartingaleStrategy, Depends(get_martingale_strategy)]
 MicroCapDep = Annotated[MicroCapStrategy, Depends(get_micro_cap_strategy)]
+SchedulerDep = Annotated[StrategyScheduler, Depends(get_strategy_scheduler)]

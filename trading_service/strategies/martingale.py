@@ -25,6 +25,9 @@ class MartingaleConfig(StrategyConfig):
 class MartingaleStrategy(Strategy):
     """马丁格尔策略。"""
 
+    name = "martingale"
+    cron = "*/30 * * * * *"  # 6字段：秒 分 时 日 月 周 = 每30秒
+
     def __init__(
         self,
         exchange: MockExchange,

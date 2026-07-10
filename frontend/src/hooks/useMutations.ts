@@ -6,6 +6,7 @@ import { ENDPOINTS } from '@/lib/constants'
 import type {
   ClosePositionResponse,
   StrategyExecuteResponse,
+  StrategySchedule,
 } from '@/types'
 
 /** 平仓 -- POST /api/positions/{id}/close */
@@ -60,6 +61,36 @@ export function useExecuteStrategy(strategy: 'martingale' | 'micro-cap') {
     },
     onError: (err) => {
       toast.error(`策略执行失败：${err.message}`)
+    },
+  })
+}
+
+/** 启动策略调度 -- POST /api/strategies/{name}/start */
+export function useStartStrategySchedule() {
+  const qc = useQueryClient()
+  return useMutation<StrategySchedule, Error, string>({
+    mutationFn: (name) => apiPost<StrategySchedule>(ENDPOINTS.strategyStart(name)),
+    onSuccess: (data) => {
+      toast.success(`${data.strategy_name} 定时调度已启动`)
+      qc.invalidateQueries({ queryKey: ['strategy-status'] })
+    },
+    onError: (err) => {
+      toast.error(`启动调度失败：${err.message}`)
+    },
+  })
+}
+
+/** 停止策略调度 -- POST /api/strategies/{name}/stop */
+export function useStopStrategySchedule() {
+  const qc = useQueryClient()
+  return useMutation<StrategySchedule, Error, string>({
+    mutationFn: (name) => apiPost<StrategySchedule>(ENDPOINTS.strategyStop(name)),
+    onSuccess: (data) => {
+      toast.success(`${data.strategy_name} 定时调度已停止`)
+      qc.invalidateQueries({ queryKey: ['strategy-status'] })
+    },
+    onError: (err) => {
+      toast.error(`停止调度失败：${err.message}`)
     },
   })
 }

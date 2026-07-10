@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from trading_service.api import positions, orders, signals, timeline, strategies
+from trading_service.api.deps import get_strategy_scheduler
 from trading_service.config import settings
 from trading_service.migration_check import check_migrations, run_migrations
 
@@ -44,7 +45,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any, None]:
     # 启动时校验并运行数据库迁移
     validate_migrations()
 
+    # 启动策略调度器，恢复关闭前的运行状态
+    scheduler = get_strategy_scheduler()
+    await scheduler.start()
+    logger.info("⏰ 策略调度器已启动")
+
     yield
+
+    # 关闭策略调度器
+    await scheduler.shutdown()
     logger.info("👋 Trading Service shutdown complete")
 
 

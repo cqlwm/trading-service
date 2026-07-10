@@ -13,6 +13,7 @@ dependencies = [
     "alembic>=1.13.0",
     "requests>=2.34.2",
     "pydantic>=2.13.4",
+    "apscheduler>=3.11.3",
 ]
 
 [tool.pyright]

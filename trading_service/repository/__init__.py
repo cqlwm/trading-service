@@ -11,7 +11,13 @@
 """
 
 # 数据记录类（供业务层使用）
-from trading_service.repository.abc import OrderRecord, PositionRecord, SignalRecord
+from trading_service.repository.abc import (
+    OrderRecord,
+    PositionRecord,
+    SignalRecord,
+    StrategyExecutionRecord,
+    StrategyScheduleRecord,
+)
 
 # Repository 抽象接口
 from trading_service.repository.abc import TradingRepository
@@ -20,13 +26,22 @@ from trading_service.repository.abc import TradingRepository
 from trading_service.repository.sqlalchemy_impl import SqlalchemyTradingStore
 
 # ORM 模型（供迁移和数据层内部使用）
-from trading_service.repository.models import Base, OrderModel, PositionModel, SignalModel
+from trading_service.repository.models import (
+    Base,
+    OrderModel,
+    PositionModel,
+    SignalModel,
+    StrategyExecutionModel,
+    StrategyScheduleModel,
+)
 
 __all__ = [
     # 数据记录类
     "PositionRecord",
     "OrderRecord",
     "SignalRecord",
+    "StrategyScheduleRecord",
+    "StrategyExecutionRecord",
     # 抽象接口
     "TradingRepository",
     # SQLAlchemy 实现
@@ -36,4 +51,6 @@ __all__ = [
     "PositionModel",
     "OrderModel",
     "SignalModel",
+    "StrategyScheduleModel",
+    "StrategyExecutionModel",
 ]

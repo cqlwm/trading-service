@@ -25,6 +25,12 @@ class StrategyConfig:
 class Strategy(ABC):
     """策略基类。"""
 
+    # 策略标识，用于调度注册和 API 路径（子类必须覆盖）
+    name: str = ""
+    # cron 表达式（7 字段：秒 分 时 日 月 周 年），空=不参与定时调度
+    # 示例："*/30 * * * * *" = 每30秒，"0 * * * * *" = 每分钟
+    cron: str = ""
+
     def __init__(
         self,
         exchange: MockExchange,

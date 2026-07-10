@@ -53,6 +53,31 @@ class SignalRecord:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+@dataclass
+class StrategyScheduleRecord:
+    """策略调度配置记录。"""
+
+    strategy_name: str
+    cron: str = ""
+    enabled: bool = False
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class StrategyExecutionRecord:
+    """策略执行历史记录。"""
+
+    id: str
+    strategy_name: str
+    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    finished_at: datetime | None = None
+    success: bool = False
+    action_count: int = 0
+    actions_json: list[dict[str, str]] = field(default_factory=list)
+    error: str | None = None
+
+
 class TradingRepository(ABC):
     """交易数据 Repository 接口（工作单元模式）"""
 
@@ -157,6 +182,33 @@ class TradingRepository(ABC):
         severity_min: int | None = None,
     ) -> int:
         """统计信号总数。"""
+
+    # ---- 策略调度 ----
+
+    @abstractmethod
+    def save_schedule(self, schedule: StrategyScheduleRecord) -> None:
+        """保存策略调度配置（upsert）。"""
+
+    @abstractmethod
+    def get_schedule(self, strategy_name: str) -> StrategyScheduleRecord | None:
+        """获取策略调度配置。"""
+
+    @abstractmethod
+    def list_schedules(self) -> list[StrategyScheduleRecord]:
+        """列出所有策略调度配置。"""
+
+    @abstractmethod
+    def save_execution(self, execution: StrategyExecutionRecord) -> None:
+        """保存策略执行记录。"""
+
+    @abstractmethod
+    def list_executions(
+        self,
+        strategy_name: str,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[StrategyExecutionRecord]:
+        """列出策略执行历史（按时间倒序）。"""
 
     def transaction(self) -> "TransactionContext":
         """事务上下文管理器。

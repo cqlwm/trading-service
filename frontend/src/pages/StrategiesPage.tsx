@@ -1,28 +1,93 @@
-import { Activity, History } from 'lucide-react'
+import { useState } from 'react'
+import { Activity, ChevronDown, ChevronRight, History } from 'lucide-react'
 
 import { StrategyCard } from '@/components/strategies/StrategyCard'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/Badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { StatusBadge } from '@/components/ui/DirectionBadges'
-import { PnLBadge } from '@/components/ui/PnLBadge'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/Table'
-import { EmptyState, ErrorState } from '@/components/ui/States'
-import { TableSkeleton } from '@/components/ui/Skeleton'
-import { useExecuteStrategy } from '@/hooks/useMutations'
+  useExecuteStrategy,
+  useStartStrategySchedule,
+  useStopStrategySchedule,
+} from '@/hooks/useMutations'
 import {
   useMartingaleStatus,
   useMicroCapStatus,
   useMicroCapHistory,
+  useStrategyExecutions,
 } from '@/hooks/useStrategies'
 import { formatDateTime, formatPrice } from '@/lib/format'
+import { cn } from '@/lib/cn'
+
+/** 执行历史折叠列表 */
+function ExecutionHistory({ name }: { name: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const { data: executions, isLoading } = useStrategyExecutions(name, 10)
+
+  return (
+    <Card>
+      <CardHeader>
+        <button
+          className="flex w-full items-center justify-between"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          <CardTitle>
+            <span className="flex items-center gap-1.5">
+              <History size={14} /> 最近执行记录
+            </span>
+          </CardTitle>
+          {expanded ? (
+            <ChevronDown size={16} className="text-muted-foreground" />
+          ) : (
+            <ChevronRight size={16} className="text-muted-foreground" />
+          )}
+        </button>
+      </CardHeader>
+      {expanded && (
+        <CardContent>
+          {isLoading ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">加载中...</p>
+          ) : (executions ?? []).length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">暂无执行记录</p>
+          ) : (
+            <div className="space-y-2">
+              {(executions ?? []).map((exec) => (
+                <div
+                  key={exec.id}
+                  className="flex items-center gap-3 rounded-md border border-border/60 p-2 text-sm"
+                >
+                  <span
+                    className={cn(
+                      'h-2 w-2 shrink-0 rounded-full',
+                      exec.success ? 'bg-success' : 'bg-destructive',
+                    )}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    {formatDateTime(exec.started_at)}
+                  </span>
+                  <Badge variant={exec.success ? 'success' : 'destructive'}>
+                    {exec.success ? `${exec.action_count} 项操作` : '失败'}
+                  </Badge>
+                  {exec.actions.length > 0 && (
+                    <span className="flex-1 truncate text-xs text-muted-foreground">
+                      {exec.actions.map((a) => `${a.symbol} ${a.detail}`).join('; ')}
+                    </span>
+                  )}
+                  {exec.error && (
+                    <span className="flex-1 truncate text-xs text-destructive">
+                      {exec.error}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  )
+}
 
 export function StrategiesPage() {
   const martingale = useMartingaleStatus()
@@ -30,15 +95,17 @@ export function StrategiesPage() {
   const history = useMicroCapHistory(20)
   const executeMartingale = useExecuteStrategy('martingale')
   const executeMicroCap = useExecuteStrategy('micro-cap')
+  const startSchedule = useStartStrategySchedule()
+  const stopSchedule = useStopStrategySchedule()
 
   return (
     <div>
       <PageHeader
         title="策略"
-        description="策略引擎控制台"
+        description="策略引擎控制台 - 管理定时调度与手动执行"
         actions={
           <Badge variant="outline" className="gap-1.5">
-            <Activity size={12} className="animate-pulse text-success" />
+            <Activity size={12} className="text-success" />
             实时状态
           </Badge>
         }
@@ -52,6 +119,11 @@ export function StrategiesPage() {
             isLoading={martingale.isLoading}
             isExecuting={executeMartingale.isPending}
             onExecute={() => executeMartingale.mutate()}
+            schedule={martingale.data?.schedule}
+            isStarting={startSchedule.isPending}
+            isStopping={stopSchedule.isPending}
+            onStart={() => startSchedule.mutate('martingale')}
+            onStop={() => stopSchedule.mutate('martingale')}
             openPositions={martingale.data?.open_positions ?? 0}
             totalPositions={martingale.data?.total_positions ?? 0}
             maxPositions={martingale.data?.config.max_positions ?? 0}
@@ -78,6 +150,11 @@ export function StrategiesPage() {
             isLoading={microCap.isLoading}
             isExecuting={executeMicroCap.isPending}
             onExecute={() => executeMicroCap.mutate()}
+            schedule={microCap.data?.schedule}
+            isStarting={startSchedule.isPending}
+            isStopping={stopSchedule.isPending}
+            onStart={() => startSchedule.mutate('micro_cap')}
+            onStop={() => stopSchedule.mutate('micro_cap')}
             openPositions={microCap.data?.open_positions ?? 0}
             totalPositions={microCap.data?.total_positions ?? 0}
             maxPositions={microCap.data?.config.max_positions ?? 0}
@@ -100,62 +177,47 @@ export function StrategiesPage() {
           />
         </div>
 
+        {/* 执行历史 */}
+        <div className="grid gap-4 lg:grid-cols-2">
+          <ExecutionHistory name="martingale" />
+          <ExecutionHistory name="micro_cap" />
+        </div>
+
         {/* 微市值历史记录 */}
         <Card>
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle>
               <span className="flex items-center gap-1.5">
-                <History size={14} /> 微市值历史记录
+                <History size={14} /> 微市值持仓历史
               </span>
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {history.isLoading ? (
-              <TableSkeleton rows={5} cols={5} />
-            ) : history.isError ? (
-              <ErrorState
-                message={history.error?.message ?? '加载失败'}
-                onRetry={() => history.refetch()}
-              />
-            ) : (history.data ?? []).length === 0 ? (
-              <EmptyState message="暂无历史记录" />
+            {(history.data ?? []).length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">暂无历史记录</p>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>交易对</TableHead>
-                    <TableHead className="text-right">开仓价</TableHead>
-                    <TableHead className="text-right">平仓价</TableHead>
-                    <TableHead className="text-right">盈亏</TableHead>
-                    <TableHead>状态</TableHead>
-                    <TableHead>时间</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(history.data ?? []).map((item, i) => (
-                    <TableRow key={`${item.symbol}-${i}`}>
-                      <TableCell className="font-mono text-xs font-medium">
-                        {item.symbol}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatPrice(item.entry_price)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatPrice(item.exit_price)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <PnLBadge pnlPct={item.pnl_pct} />
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={item.status} />
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {formatDateTime(item.created_at)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <div className="space-y-2">
+                {(history.data ?? []).map((item, i) => (
+                  <div
+                    key={`${item.symbol}-${i}`}
+                    className="flex items-center gap-3 rounded-md border border-border/60 p-2 text-sm"
+                  >
+                    <span className="font-mono text-xs font-medium">{item.symbol}</span>
+                    <span className="tabular-nums text-xs text-muted-foreground">
+                      开仓 {formatPrice(item.entry_price)}
+                    </span>
+                    {item.exit_price && (
+                      <span className="tabular-nums text-xs text-muted-foreground">
+                        平仓 {formatPrice(item.exit_price)}
+                      </span>
+                    )}
+                    <StatusBadge status={item.status} />
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {formatDateTime(item.created_at)}
+                    </span>
+                  </div>
+                ))}
+              </div>
             )}
           </CardContent>
         </Card>

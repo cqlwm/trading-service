@@ -20,4 +20,9 @@ export const ENDPOINTS = {
   microCapExecute: '/strategies/micro-cap/execute',
   microCapStatus: '/strategies/micro-cap/status',
   microCapHistory: '/strategies/micro-cap/history',
+  // 调度控制
+  strategyStart: (name: string) => `/strategies/${name}/start`,
+  strategyStop: (name: string) => `/strategies/${name}/stop`,
+  strategySchedule: (name: string) => `/strategies/${name}/schedule`,
+  strategyExecutions: (name: string) => `/strategies/${name}/executions`,
 } as const
