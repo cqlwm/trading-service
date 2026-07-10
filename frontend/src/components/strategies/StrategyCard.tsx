@@ -21,14 +21,10 @@ function ScheduleStatus({ schedule }: { schedule: StrategySchedule | null | unde
   }
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
       {/* 运行状态灯 */}
       <div className="flex items-center gap-2">
-        <span
-          className={cn(
-            'relative flex h-2.5 w-2.5',
-          )}
-        >
+        <span className="relative flex h-2.5 w-2.5">
           {schedule.running && (
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
           )}
@@ -77,8 +73,11 @@ function ConfigItem({ label, value }: { label: string; value: ReactNode }) {
 }
 
 /**
- * 策略卡片 -- 展示调度状态、配置、持仓统计、执行/启停按钮。
+ * 策略行 -- 每个策略占一整行，左侧策略卡片，右侧执行历史。
+ * 由 StrategiesPage 组装左右两栏。
  */
+
+/** 策略卡片（左栏） */
 export function StrategyCard({
   title,
   description,
@@ -94,7 +93,6 @@ export function StrategyCard({
   isStopping,
   onStart,
   onStop,
-  children,
 }: {
   title: string
   description: string
@@ -108,14 +106,13 @@ export function StrategyCard({
   schedule: StrategySchedule | null | undefined
   isStarting: boolean
   isStopping: boolean
-  onStart: () => void
   onStop: () => void
-  children?: ReactNode
+  onStart: () => void
 }) {
   const running = schedule?.running ?? false
 
   return (
-    <Card>
+    <Card className="flex flex-col">
       <CardHeader className="flex-row items-center justify-between">
         <div>
           <CardTitle className="text-base font-semibold text-foreground">{title}</CardTitle>
@@ -155,7 +152,7 @@ export function StrategyCard({
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="flex flex-1 flex-col gap-4">
         {/* 调度状态 */}
         <div className="rounded-md border border-border p-3">
           {isLoading ? (
@@ -188,7 +185,7 @@ export function StrategyCard({
         )}
 
         {/* 配置 */}
-        <div className="rounded-md border border-border p-3">
+        <div className="flex-1 rounded-md border border-border p-3">
           {isLoading ? (
             <div className="space-y-2">
               {Array.from({ length: configItems.length }).map((_, i) => (
@@ -196,13 +193,13 @@ export function StrategyCard({
               ))}
             </div>
           ) : (
-            configItems.map((item) => (
-              <ConfigItem key={item.label} label={item.label} value={item.value} />
-            ))
+            <div className="grid grid-cols-2 gap-x-6">
+              {configItems.map((item) => (
+                <ConfigItem key={item.label} label={item.label} value={item.value} />
+              ))}
+            </div>
           )}
         </div>
-
-        {children}
       </CardContent>
     </Card>
   )
