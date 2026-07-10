@@ -28,3 +28,8 @@ config.local.yaml
 # OS files
 .DS_Store
 Thumbs.db
+
+.mypy_cache/
+.pytest_cache/
+.zcode/
+mydata/
