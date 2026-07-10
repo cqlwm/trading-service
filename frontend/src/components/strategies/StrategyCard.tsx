@@ -112,8 +112,8 @@ export function StrategyCard({
   const running = schedule?.running ?? false
 
   return (
-    <Card className="flex flex-col">
-      <CardHeader className="flex-row items-center justify-between">
+    <Card className="flex h-full flex-col">
+      <CardHeader className="flex flex-shrink-0 flex-row items-center justify-between">
         <div>
           <CardTitle className="text-base font-semibold text-foreground">{title}</CardTitle>
           <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
@@ -152,7 +152,7 @@ export function StrategyCard({
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="flex flex-1 flex-col gap-4">
+      <CardContent className="flex flex-1 flex-col gap-4 overflow-hidden">
         {/* 调度状态 */}
         <div className="rounded-md border border-border p-3">
           {isLoading ? (

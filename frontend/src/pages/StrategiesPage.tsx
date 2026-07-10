@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { Activity, ChevronDown, ChevronRight, History } from 'lucide-react'
+import { Activity, History } from 'lucide-react'
 
 import { StrategyCard } from '@/components/strategies/StrategyCard'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -22,51 +21,40 @@ import type { ReactNode } from 'react'
 
 /** 执行历史面板（右栏） */
 function ExecutionHistoryPanel({ name }: { name: string }) {
-  const [expanded, setExpanded] = useState(true)
   const { data: executions, isLoading } = useStrategyExecutions(name, 10)
 
   return (
-    <Card className="flex flex-col">
-      <CardHeader>
-        <button
-          className="flex w-full items-center justify-between"
-          onClick={() => setExpanded((v) => !v)}
-        >
-          <CardTitle>
-            <span className="flex items-center gap-1.5">
-              <History size={14} /> 执行记录
-            </span>
-          </CardTitle>
-          {expanded ? (
-            <ChevronDown size={16} className="text-muted-foreground" />
-          ) : (
-            <ChevronRight size={16} className="text-muted-foreground" />
-          )}
-        </button>
+    <Card className="flex h-full flex-col">
+      <CardHeader className="flex-shrink-0">
+        <CardTitle>
+          <span className="flex items-center gap-1.5">
+            <History size={14} /> 执行记录
+          </span>
+        </CardTitle>
       </CardHeader>
-      {expanded && (
-        <CardContent className="flex-1">
+      <CardContent className="flex-1 overflow-hidden p-0">
+          <div className="h-full max-h-72 overflow-y-auto px-4 py-4">
           {isLoading ? (
             <p className="py-4 text-center text-sm text-muted-foreground">加载中...</p>
           ) : (executions ?? []).length === 0 ? (
             <p className="py-4 text-center text-sm text-muted-foreground">暂无执行记录</p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {(executions ?? []).map((exec) => (
                 <div
                   key={exec.id}
-                  className="flex items-center gap-3 rounded-md border border-border/60 p-2 text-sm"
+                  className="flex items-center gap-2 rounded-md border border-border/60 p-1.5 text-sm"
                 >
                   <span
                     className={cn(
-                      'h-2 w-2 shrink-0 rounded-full',
+                      'h-1.5 w-1.5 shrink-0 rounded-full',
                       exec.success ? 'bg-success' : 'bg-destructive',
                     )}
                   />
-                  <span className="shrink-0 text-xs text-muted-foreground">
+                  <span className="shrink-0 text-xs text-muted-foreground font-mono">
                     {formatDateTime(exec.started_at)}
                   </span>
-                  <Badge variant={exec.success ? 'success' : 'destructive'} className="shrink-0">
+                  <Badge variant={exec.success ? 'success' : 'destructive'} className="shrink-0 text-xs">
                     {exec.success ? `${exec.action_count} 项操作` : '失败'}
                   </Badge>
                   {exec.actions.length > 0 && (
@@ -83,8 +71,8 @@ function ExecutionHistoryPanel({ name }: { name: string }) {
               ))}
             </div>
           )}
-        </CardContent>
-      )}
+        </div>
+      </CardContent>
     </Card>
   )
 }
@@ -98,7 +86,7 @@ function StrategyRow({
   historyName: string
 }) {
   return (
-    <div className="grid gap-4 lg:grid-cols-5">
+    <div className="grid items-stretch gap-4 lg:grid-cols-5">
       <div className="lg:col-span-3">{card}</div>
       <div className="lg:col-span-2">
         <ExecutionHistoryPanel name={historyName} />
