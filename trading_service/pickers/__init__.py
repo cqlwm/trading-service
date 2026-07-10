@@ -8,7 +8,21 @@ from trading_service.pickers.pipeline import (
     ISymbolSource,
     SelectionPipeline,
 )
-from trading_service.pickers.symbol_picker import AlphaTokenSource
+from trading_service.pickers.backtest import (
+    BacktestResult,
+    BacktestTrade,
+    PortfolioConfig,
+    SignalEntry,
+    scan_tp,
+    simulate_portfolio,
+    simulate_trade,
+    summarize,
+)
+from trading_service.pickers.signal import is_delisting_soon, is_notable_signal
+from trading_service.pickers.symbol_picker import (
+    PERPETUAL_DELIVERY_SENTINEL,
+    AlphaTokenSource,
+)
 from trading_service.pickers.technical_analyzer import (
     CrossSignal,
     ITechnicalAnalyzer,
@@ -32,4 +46,18 @@ __all__ = [
     "TechnicalAnalyzer",
     "TechnicalAnalysisFilter",
     "CrossSignal",
+    # 技术信号判定（展示层/策略层按需过滤）
+    "is_notable_signal",
+    "is_delisting_soon",
+    # 合约生命周期
+    "PERPETUAL_DELIVERY_SENTINEL",
+    # 回测
+    "BacktestTrade",
+    "BacktestResult",
+    "SignalEntry",
+    "PortfolioConfig",
+    "simulate_trade",
+    "simulate_portfolio",
+    "summarize",
+    "scan_tp",
 ]

@@ -11,7 +11,9 @@ trading_service/
 │   ├── pipeline.py              # ISymbolSource / ISymbolFilter / SelectionPipeline 编排器
 │   ├── symbol_picker.py         # AlphaTokenSource 数据源（基础选币，不含技术分析）
 │   ├── technical_analyzer.py    # ITechnicalAnalyzer / TechnicalAnalyzer 技术分析工具
-│   └── technical_filter.py      # TechnicalAnalysisFilter（纯增强技术阶段）
+│   ├── technical_filter.py      # TechnicalAnalysisFilter（纯增强技术阶段）
+│   ├── signal.py                # 信号判定纯函数：is_notable_signal / is_delisting_soon
+│   └── backtest.py              # 回测核心逻辑：simulate_trade / simulate_portfolio / summarize
 │
 ├── clients/           # 外部API客户端（币安等）
 │   ├── binance_client.py        # BinanceClient（同步阻塞IO，非async）
@@ -48,11 +50,26 @@ class SymbolInfo:
     # Alpha扩展字段
     base_asset: str = ""
     yesterday_change_percent: float = 0.0
-    # 技术分析字段
+    # 技术分析字段（TechnicalAnalysisFilter 回填）
     sma_200: float | None = None
     cross_signal: CrossSignalType | None = None
     is_sideways_bottom: bool = False
+    volatility_10: float | None = None
+    # 合约生命周期字段（AlphaTokenSource 从 exchangeInfo 回填）
+    delivery_date: int | None = None  # 永续正常=哨兵值，即将下架=具体时点(ms)
     # ...
+
+## 信号判定纯函数（pickers/signal.py）
+- is_notable_signal(info) -> bool：金叉/靠近均线/横盘返回True，死叉/None返回False
+- is_delisting_soon(info) -> bool：delivery_date偏离哨兵值即True（即将下架）
+- PERPETUAL_DELIVERY_SENTINEL = 4133404800000（哨兵常量，定义在 symbol_picker.py）
+
+## 回测核心逻辑（pickers/backtest.py）
+- simulate_trade(...)：单笔模拟（无资金约束），逐日判定止盈/下架/未决
+- simulate_portfolio(...)：日级资金调度（100U/10仓约束），按日推进维护资金池
+- _check_position_on_day(...)：共享原语，单笔仓位某日是否触发止盈/下架
+- PortfolioConfig(total_capital=100, position_size=10, max_positions=10)
+- 二元盈亏结构：赢 +10×TP%，输 ≈ -10×loss_pct（下架清算，非精确-100%）
 
 # -----------------------
 # ⚠️ 常见陷阱检查清单（踩过的坑！）
@@ -65,6 +82,19 @@ class SymbolInfo:
 6. ✅ BinanceClient 是同步的，如果要在 async pick() 里用，必须套线程池
 7. ✅ K线数据类是 BinanceFutureKline，不是 KLine 或其他名字
 8. ✅ 所有 enum 定义在 types.py，不要分散定义
+9. ⚠️ deliveryDate 哨兵值陷阱：永续合约 deliveryDate=4133404800000（2100-12-25）
+   表示"永不到期"；即将下架时 Binance 会改成具体时点（提前约15天）。
+   判定下架用 is_delisting_soon()，不要自己比较数字！
+   注意：ccxt 会把永续/哨兵值的 expiry 置 None 丢弃，但我们用 Pydantic
+   直接建模原始字段（BinanceFutureSymbol.delivery_date），能拿到真值。
+10. ⚠️ TechnicalAnalysisFilter 是「纯增强不丢弃」设计（有测试保护的不变量）：
+    死叉(DEAD)和无信号(None)的代币都会保留，只回填技术字段。
+    展示层/策略层按需用 is_notable_signal() 过滤，不要改 filter 本身！
+11. ⚠️ 回测生存者偏差（未解决）：候选池是「当前仍在交易的」代币，
+    已下架的币不在候选池里 -> loss 永远为0 -> 胜率虚高100%。
+    回测的绝对盈亏不可信，只有相对结论（TP之间比较）有参考价值。
+12. ⚠️ 回测资金约束：simulate_portfolio 按100U/10仓约束，止盈释放资金可复用，
+    下架不释放。同一代币可叠加加仓。不要用 simulate_trade 做资金约束回测！
 
 # -----------------------
 # 📝 命名约定

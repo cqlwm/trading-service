@@ -14,6 +14,7 @@ import argparse
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 
 from trading_service.clients import BinanceClient
 from trading_service.pickers import (
@@ -22,6 +23,8 @@ from trading_service.pickers import (
     SymbolInfo,
     TechnicalAnalysisFilter,
     TechnicalAnalyzer,
+    is_delisting_soon,
+    is_notable_signal,
 )
 from trading_service.types import CrossSignalType
 
@@ -70,21 +73,35 @@ def print_sideways_icon(info: SymbolInfo) -> str:
     return "⏸️" if info.is_sideways_bottom else "  "
 
 
+def delisting_label(info: SymbolInfo) -> str:
+    """下架预警标签：即将下架显示 ⚠️ + 月-日，否则空。"""
+    if not is_delisting_soon(info) or info.delivery_date is None:
+        return ""
+    dt = datetime.fromtimestamp(info.delivery_date / 1000, tz=timezone.utc)
+    return f"⚠️{dt:%m-%d}"
+
+
 def print_results(results: list[SymbolInfo], duration: float, interval: str) -> None:
     """打印筛选结果。"""
-    if not results:
-        print("⚠️  暂无符合条件的代币")
+    # 只展示三类关注信号：金叉 / 靠近均线 / 底部横盘
+    # picker 的过滤器是「纯增强不丢弃」（保留死叉/无信号），此处按展示需要过滤
+    notable = [r for r in results if is_notable_signal(r)]
+    if not notable:
+        print("⚠️  暂无符合展示条件的代币（金叉 / 靠近均线 / 底部横盘）")
         return
 
     # 统计各类信号
-    golden = sum(1 for r in results if r.cross_signal == CrossSignalType.GOLDEN)
-    near = sum(1 for r in results if r.cross_signal == CrossSignalType.NEAR)
-    sideways = sum(1 for r in results if r.is_sideways_bottom)
+    golden = sum(1 for r in notable if r.cross_signal == CrossSignalType.GOLDEN)
+    near = sum(1 for r in notable if r.cross_signal == CrossSignalType.NEAR)
+    sideways = sum(1 for r in notable if r.is_sideways_bottom)
+    delisting = sum(1 for r in notable if is_delisting_soon(r))
 
-    print(f"✅ 筛选完成，共 {len(results)} 个代币符合条件")
+    print(f"✅ 筛选完成，共 {len(notable)} 个代币符合展示条件")
     print(f"   - 刚突破均线: {golden} 个")
     print(f"   - 靠近均线附近: {near} 个")
     print(f"   - 底部横盘: {sideways} 个")
+    if delisting:
+        print(f"   - ⚠️ 即将下架: {delisting} 个（注意规避）")
     print(f"⏱️   耗时: {duration:.1f} 秒")
     print()
 
@@ -92,12 +109,12 @@ def print_results(results: list[SymbolInfo], duration: float, interval: str) -> 
     header = (
         f"{'排名':<4} {'代币':<12} {'市值(万)':>12} "
         f"{'昨日涨幅':>10} {'当前价':>10} {'SMA200':>10} {'距离%':>8} "
-        f"{'波动%':>7} {'突破':<5} {'横盘':<5}"
+        f"{'波动%':>7} {'突破':<5} {'横盘':<5} {'下架':<8}"
     )
     print(header)
-    print("-" * 95)
+    print("-" * 105)
 
-    for i, info in enumerate(results, 1):
+    for i, info in enumerate(notable, 1):
         market_cap_wan = info.market_cap / 10000
         cross_icon = print_cross_icon(info)
         sideways_icon = print_sideways_icon(info)
@@ -117,18 +134,20 @@ def print_results(results: list[SymbolInfo], duration: float, interval: str) -> 
             f"{dist_str:>8} "
             f"{vol_str:>7} "
             f"{cross_icon:<5} "
-            f"{sideways_icon:<5}"
+            f"{sideways_icon:<5} "
+            f"{delisting_label(info):<8}"
         )
 
     print()
     print("=" * 90)
     print("图标说明:")
-    print("  🔥 金叉突破   ⚡ 靠近均线   🔻 死叉   ⏸️ 底部横盘")
+    print("  🔥 金叉突破   ⚡ 靠近均线   ⏸️ 底部横盘   ⚠️ 即将下架(月-日)")
     print()
     print("策略建议:")
     print("  1. 优先关注 🔥刚突破均线 + ⏸️底部横盘的标的")
     print("  2. 波动率越小（横盘越久），突破后潜力可能越大")
-    print("  3. 小市值代币波动大，注意仓位管理")
+    print("  3. ⚠️ 即将下架的标的务必规避，切勿入场")
+    print("  4. 小市值代币波动大，注意仓位管理")
 
 
 async def main() -> None:

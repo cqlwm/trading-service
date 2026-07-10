@@ -42,6 +42,9 @@ class SymbolInfo:
     is_sideways_bottom: bool = False  # 是否底部横盘
     volatility_10: float | None = None  # 最近10根K线波动率%
 
+    # === 合约生命周期字段（由 AlphaTokenSource 从 exchangeInfo 回填）===
+    delivery_date: int | None = None  # 交割/下架日期(ms)；永续正常=哨兵值，即将下架=具体时点
+
 
 class ISymbolPicker(ABC):
     """选币器接口（策略层契约）。

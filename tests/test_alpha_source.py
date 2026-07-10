@@ -40,11 +40,18 @@ def make_alpha_token(symbol: str, market_cap: float | None) -> BinanceAlphaToken
     })
 
 
-def make_symbol_info_row(base: str, status: str = "TRADING") -> BinanceFutureSymbol:
-    """构造一个可交易的合约交易对（仅填充 source 用到的字段）。"""
+def make_symbol_info_row(
+    base: str,
+    status: str = "TRADING",
+    delivery_date: int = 4133404800000,
+) -> BinanceFutureSymbol:
+    """构造一个可交易的合约交易对（仅填充 source 用到的字段）。
+
+    delivery_date 默认为永续合约哨兵值（永不到期）；即将下架的代币传入具体时点。
+    """
     return BinanceFutureSymbol(
         symbol=f"{base}USDT", pair=f"{base}USDT", contractType="PERPETUAL",
-        deliveryDate=0, onboardDate=0, status=status, maintMarginPercent="0",
+        deliveryDate=delivery_date, onboardDate=0, status=status, maintMarginPercent="0",
         requiredMarginPercent="0", baseAsset=base, quoteAsset="USDT",
         marginAsset="USDT", pricePrecision=8, quantityPrecision=8,
         baseAssetPrecision=8, quotePrecision=8, underlyingType="COIN",
@@ -246,3 +253,60 @@ class TestAlphaSourceEmpty:
         source = AlphaTokenSource(client=client)
         result = await source.fetch()
         assert result == []
+
+
+class TestAlphaSourceCarriesDeliveryDate:
+    """下架预警数据流：source 应把 exchangeInfo 的 delivery_date 透传到 SymbolInfo。"""
+
+    @pytest.mark.asyncio
+    async def test_carries_sentinel_for_normal_perpetual(self) -> None:
+        """正常路径：正常永续合约 -> info.delivery_date == 哨兵值。"""
+        client = FakeAlphaClient(
+            alpha_tokens=[make_alpha_token("ABC", 10_000_000)],
+            symbols=[make_symbol_info_row("ABC", delivery_date=4133404800000)],
+            klines_by_symbol={"ABCUSDT": BULLISH_KLINES},
+        )
+        source = AlphaTokenSource(client=client)
+        result = await source.fetch()
+
+        assert len(result) == 1
+        assert result[0].delivery_date == 4133404800000, "正常永续应携带哨兵值"
+
+    @pytest.mark.asyncio
+    async def test_carries_concrete_date_for_delisting(self) -> None:
+        """正常路径：即将下架 -> info.delivery_date == 具体下架时点。"""
+        delisting_date = 1782637200000  # IPUSDT 式下架时点
+        client = FakeAlphaClient(
+            alpha_tokens=[make_alpha_token("DLST", 10_000_000)],
+            symbols=[make_symbol_info_row("DLST", delivery_date=delisting_date)],
+            klines_by_symbol={"DLSTUSDT": BULLISH_KLINES},
+        )
+        source = AlphaTokenSource(client=client)
+        result = await source.fetch()
+
+        assert len(result) == 1
+        assert result[0].delivery_date == delisting_date, "即将下架应携带具体时点"
+
+    @pytest.mark.asyncio
+    async def test_mixed_delisting_dates_preserved(self) -> None:
+        """组合：正常与即将下架并存，各自 delivery_date 正确保留。"""
+        client = FakeAlphaClient(
+            alpha_tokens=[
+                make_alpha_token("NORM", 5_000_000),
+                make_alpha_token("DLST", 10_000_000),
+            ],
+            symbols=[
+                make_symbol_info_row("NORM", delivery_date=4133404800000),
+                make_symbol_info_row("DLST", delivery_date=1782637200000),
+            ],
+            klines_by_symbol={
+                "NORMUSDT": BULLISH_KLINES,
+                "DLSTUSDT": BULLISH_KLINES,
+            },
+        )
+        source = AlphaTokenSource(client=client)
+        result = await source.fetch()
+
+        by_sym = {i.symbol: i for i in result}
+        assert by_sym["NORMUSDT"].delivery_date == 4133404800000
+        assert by_sym["DLSTUSDT"].delivery_date == 1782637200000
