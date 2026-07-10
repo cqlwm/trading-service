@@ -33,7 +33,7 @@ function ExecutionHistoryPanel({ name }: { name: string }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="flex-1 overflow-hidden p-0">
-          <div className="h-full max-h-72 overflow-y-auto px-4 py-4">
+          <div className="h-full max-h-72 overflow-y-auto px-4 pt-0 pb-4">
           {isLoading ? (
             <p className="py-4 text-center text-sm text-muted-foreground">加载中...</p>
           ) : (executions ?? []).length === 0 ? (
