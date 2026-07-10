@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from trading_service.exchange import MockExchange
 from trading_service.pickers import ISymbolPicker, SymbolInfo
-from trading_service.strategies.base import Strategy, StrategyConfig
+from trading_service.strategies.base import Strategy, StrategyAction, StrategyConfig
 from trading_service.types import CrossSignalType, TradeDirection
 
 
@@ -37,21 +37,25 @@ class MicroCapStrategy(Strategy):
         super().__init__(exchange, config, symbol_picker)
         self.config: MicroCapConfig = config
 
-    async def execute(self) -> None:
+    async def execute(self) -> list[StrategyAction]:
         """执行策略 - 仅入场逻辑。
 
         优先级：止盈/止损留待下一轮实现，本轮只做开新仓。
+        返回执行的动作列表。
         """
+        actions: list[StrategyAction] = []
         positions = self.exchange.get_positions(tag="micro_cap", status="open")
         current_count = len(positions)
 
         if current_count >= self.config.max_positions:
-            return
+            return actions
 
-        await self._open_new_positions(current_count)
+        actions.extend(await self._open_new_positions(current_count))
+        return actions
 
-    async def _open_new_positions(self, current_count: int) -> None:
+    async def _open_new_positions(self, current_count: int) -> list[StrategyAction]:
         """筛选买入信号并开新仓。"""
+        actions: list[StrategyAction] = []
         candidates = await self.symbol_picker.pick()
 
         occupied = {
@@ -64,7 +68,7 @@ class MicroCapStrategy(Strategy):
         ]
 
         if not signals:
-            return
+            return actions
 
         slots = self.config.max_positions - current_count
         prices = await self.exchange.fetch_prices([s.symbol for s in signals])
@@ -80,6 +84,12 @@ class MicroCapStrategy(Strategy):
                     tag="micro_cap",
                     reason=self._entry_reason(info),
                 )
+                actions.append(StrategyAction(
+                    type="open",
+                    symbol=info.symbol,
+                    detail=f"开仓 @ {price}",
+                ))
+        return actions
 
     def _is_buy_signal(self, info: SymbolInfo) -> bool:
         """判定是否为买入信号：横盘或近期金叉突破。"""
@@ -100,6 +110,9 @@ class MicroCapStrategy(Strategy):
                 "max_positions": self.config.max_positions,
                 "position_size_usdt": self.config.position_size_usdt,
                 "take_profit_pct": self.config.take_profit_pct,
+                "stop_loss_pct": self.config.stop_loss_pct,
+                "min_volume_usdt": self.config.min_volume_usdt,
+                "max_market_cap": self.config.max_market_cap,
             },
             "open_positions": len([p for p in positions if p.status == "open"]),
             "total_positions": len(positions),

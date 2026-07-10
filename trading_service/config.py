@@ -75,6 +75,9 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+# 展开 db_path 中的 ~ 为实际 home 路径（SQLAlchemy 不会自动展开）
+settings.db_path = str(Path(settings.db_path).expanduser())
+
 # 确保 DB 路径存在
-DB_PARENT = Path(settings.db_path).expanduser().parent
+DB_PARENT = Path(settings.db_path).parent
 DB_PARENT.mkdir(parents=True, exist_ok=True)

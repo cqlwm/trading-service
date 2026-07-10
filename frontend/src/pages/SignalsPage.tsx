@@ -86,11 +86,12 @@ export function SignalsPage() {
       severityMin: severityMin ? Number(severityMin) : undefined,
     })
 
-  const signals = data?.pages.flat() ?? []
+  const signals = data?.pages.flatMap((p) => p.data) ?? []
+  const total = data?.pages[0]?.total ?? 0
 
   return (
     <div>
-      <PageHeader title="信号" description="市场信号监控" />
+      <PageHeader title="信号" description={`市场信号监控 · 共 ${total} 条`} />
       <div className="px-6 pb-6">
         {/* 筛选栏 */}
         <FilterBar className="mb-4">

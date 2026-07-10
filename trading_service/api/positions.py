@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from trading_service.api.deps import get_exchange
 from trading_service.exchange import MockExchange
-from trading_service.utils.symbol import Symbol
 
 router = APIRouter(tags=["positions"])
 
@@ -14,20 +13,25 @@ async def _fetch_open_prices(
     symbols: list[str],
     exchange: MockExchange,
 ) -> dict[str, float]:
-    """批量获取持仓中的交易对最新价格。"""
+    """批量获取持仓中的交易对最新价格。
+
+    返回的 dict key 与持仓 symbol 一致（binance 原生格式）。
+    """
     if not symbols:
         return {}
 
-    ccxt_symbols = [Symbol.parse(s).ccxt() for s in symbols]
-    return await exchange.fetch_prices(ccxt_symbols)
+    return await exchange.fetch_prices(symbols)
 
 
 @router.get("")
 async def list_positions(
     status: str | None = None,
     exchange: MockExchange = Depends(get_exchange),
-) -> list[dict[str, Any]]:
-    """查看所有持仓（含历史），可按状态过滤。"""
+) -> dict[str, Any]:
+    """查看所有持仓（含历史），可按状态过滤。
+
+    返回 {data: [...], total: N}，total 为符合筛选条件的总数。
+    """
     resolved_status = status if status in ("open", "closed") else None
     positions = exchange.get_positions(status=resolved_status)
 
@@ -37,7 +41,7 @@ async def list_positions(
         symbols = list({p.symbol for p in open_positions})
         prices = await _fetch_open_prices(symbols, exchange)
 
-    return [
+    data = [
         {
             "id": p.id,
             "symbol": p.symbol,
@@ -45,7 +49,7 @@ async def list_positions(
             "entry_price": p.entry_price,
             "avg_price": p.entry_price,
             "current_price": prices.get(
-                Symbol.parse(p.symbol).ccxt(), p.exit_price or p.entry_price
+                p.symbol, p.exit_price or p.entry_price
             ),
             "total_size": p.total_size,
             "status": p.status,
@@ -61,7 +65,7 @@ async def list_positions(
             "layers": len([o for o in p.orders if o.order_type == "ADD"]) + 1,
             "tp_hit": p.tp_hit,
             "pnl_pct": round(
-                p.pnl_pct(prices.get(Symbol.parse(p.symbol).ccxt(), 0.0)), 2
+                p.pnl_pct(prices.get(p.symbol, 0.0)), 2
             )
             if p.status == "open"
             else round(p.final_pnl_pct, 2)
@@ -72,6 +76,8 @@ async def list_positions(
         }
         for p in positions
     ]
+
+    return {"data": data, "total": len(positions)}
 
 
 @router.get("/{position_id}")

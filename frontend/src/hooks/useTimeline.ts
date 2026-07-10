@@ -2,23 +2,24 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 
 import { apiGet, buildQuery } from '@/api/client'
 import { ENDPOINTS, PAGE_SIZE, POLL_INTERVAL } from '@/lib/constants'
-import type { TimelineEvent } from '@/types'
+import type { PaginatedResponse, TimelineEvent } from '@/types'
 
 /**
  * 全局交易时间线 -- 倒序，5 秒轮询。
  * 事件混合 signal/order/close 三种类型。
  */
 export function useTimeline() {
-  return useInfiniteQuery<TimelineEvent[]>({
+  return useInfiniteQuery<PaginatedResponse<TimelineEvent>>({
     queryKey: ['timeline'],
     queryFn: ({ pageParam }) =>
-      apiGet<TimelineEvent[]>(
+      apiGet<PaginatedResponse<TimelineEvent>>(
         ENDPOINTS.timeline + buildQuery({ limit: PAGE_SIZE, offset: (pageParam as number) ?? 0 }),
       ),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
-      if (lastPage.length < PAGE_SIZE) return undefined
-      return allPages.length * PAGE_SIZE
+      const loaded = allPages.reduce((sum, p) => sum + p.data.length, 0)
+      if (loaded >= lastPage.total) return undefined
+      return loaded
     },
     refetchInterval: POLL_INTERVAL,
   })

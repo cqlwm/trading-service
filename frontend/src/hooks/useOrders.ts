@@ -2,7 +2,7 @@ import { useInfiniteQuery } from '@tanstack/react-query'
 
 import { apiGet, buildQuery } from '@/api/client'
 import { ENDPOINTS, PAGE_SIZE } from '@/lib/constants'
-import type { Order, OrderType } from '@/types'
+import type { Order, OrderType, PaginatedResponse } from '@/types'
 
 interface OrdersParams {
   symbol?: string
@@ -11,13 +11,13 @@ interface OrdersParams {
 
 /**
  * 订单流水 -- useInfiniteQuery 实现加载更多。
- * 后端无 total 字段，以返回长度 < limit 判断是否到底。
+ * 后端返回 {data, total}，total 为符合筛选条件的总数。
  */
 export function useOrders(params: OrdersParams = {}) {
-  return useInfiniteQuery<Order[]>({
+  return useInfiniteQuery<PaginatedResponse<Order>>({
     queryKey: ['orders', params.symbol, params.orderType],
     queryFn: ({ pageParam }) =>
-      apiGet<Order[]>(
+      apiGet<PaginatedResponse<Order>>(
         ENDPOINTS.orders +
           buildQuery({
             symbol: params.symbol,
@@ -28,9 +28,10 @@ export function useOrders(params: OrdersParams = {}) {
       ),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
-      // 返回不足一页，说明到底
-      if (lastPage.length < PAGE_SIZE) return undefined
-      return allPages.length * PAGE_SIZE
+      // 已加载总数 >= total，说明到底
+      const loaded = allPages.reduce((sum, p) => sum + p.data.length, 0)
+      if (loaded >= lastPage.total) return undefined
+      return loaded
     },
   })
 }

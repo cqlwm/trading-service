@@ -111,13 +111,14 @@ export function TimelinePage() {
   const { data, isLoading, isError, error, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useTimeline()
 
-  const events = data?.pages.flat() ?? []
+  const events = data?.pages.flatMap((p) => p.data) ?? []
+  const total = data?.pages[0]?.total ?? 0
 
   return (
     <div>
       <PageHeader
         title="时间线"
-        description="全局交易事件流（信号 + 订单），5 秒自动刷新"
+        description={`全局交易事件流（信号 + 订单）· 共 ${total} 条 · 5 秒自动刷新`}
       />
       <div className="px-6 pb-6">
         <div className="rounded-lg border border-border p-4">

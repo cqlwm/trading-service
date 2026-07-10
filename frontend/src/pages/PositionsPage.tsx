@@ -22,25 +22,25 @@ export function PositionsPage() {
     status === 'all' ? 'all' : status,
   )
 
+  const allPositions = data?.data ?? []
+
   // 客户端 tag/symbol 筛选（后端不支持服务端筛选）
   const filtered = useMemo(() => {
-    if (!data) return []
     const q = search.trim().toUpperCase()
-    if (!q) return data
-    return data.filter(
+    if (!q) return allPositions
+    return allPositions.filter(
       (p) => p.symbol.toUpperCase().includes(q) || p.tag.toUpperCase().includes(q),
     )
-  }, [data, search])
+  }, [allPositions, search])
 
   // tab 计数（基于未筛选的总数据）
   const counts = useMemo(() => {
-    const all = data ?? []
     return {
-      all: all.length,
-      open: all.filter((p) => p.status === 'open').length,
-      closed: all.filter((p) => p.status === 'closed').length,
+      all: allPositions.length,
+      open: allPositions.filter((p) => p.status === 'open').length,
+      closed: allPositions.filter((p) => p.status === 'closed').length,
     }
-  }, [data])
+  }, [allPositions])
 
   const tabItems: TabItem<FilterStatus>[] = [
     { value: 'all', label: '全部', count: counts.all },
@@ -49,7 +49,7 @@ export function PositionsPage() {
   ]
 
   // 选中的持仓列表数据（传给抽屉用于显示盈亏）
-  const selectedItem = data?.find((p) => p.id === selectedId)
+  const selectedItem = allPositions.find((p) => p.id === selectedId)
 
   return (
     <div>

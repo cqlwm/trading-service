@@ -173,10 +173,19 @@ export interface MicroCapStatus {
   total_positions: number
 }
 
+/** 策略执行动作 */
+export interface StrategyAction {
+  type: string // "open" | "add" | "close" | "skip"
+  symbol: string
+  detail: string
+}
+
 /** 策略执行响应 */
 export interface StrategyExecuteResponse {
   status: string
-  message: string
+  strategy: string
+  actions: StrategyAction[]
+  action_count: number
 }
 
 /** 微市值历史记录 —— GET /api/strategies/micro-cap/history */
@@ -203,4 +212,12 @@ export interface SignalsQuery {
   severity_min?: number
   limit?: number
   offset?: number
+}
+
+/* ==================== 分页响应 ==================== */
+
+/** 统一分页响应 -- 列表端点返回 {data, total} */
+export interface PaginatedResponse<T> {
+  data: T[]
+  total: number
 }

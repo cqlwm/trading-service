@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from trading_service.repository.abc import OrderRecord, PositionRecord, SignalRecord, TradingRepository
@@ -102,7 +102,7 @@ class SqlalchemyTradingStore(TradingRepository):
                     symbol=m.symbol,
                     direction=m.direction,
                     entry_price=m.entry_price,
-                    
+
                     total_size=m.total_size,
                     status=m.status,
                     exit_price=m.exit_price,
@@ -113,6 +113,20 @@ class SqlalchemyTradingStore(TradingRepository):
                 )
                 for m in models
             ]
+
+    def count_positions(
+        self,
+        status: str | None = None,
+        tag: str | None = None,
+    ) -> int:
+        with Session(self.engine) as session:
+            query = select(func.count()).select_from(PositionModel)
+            if status:
+                query = query.where(PositionModel.status == status)
+            if tag:
+                query = query.where(PositionModel.tag == tag)
+            result = session.execute(query)
+            return result.scalar_one()
 
     def save_order(self, order: OrderRecord) -> None:
         with Session(self.engine) as session:
@@ -195,6 +209,20 @@ class SqlalchemyTradingStore(TradingRepository):
                 for m in models
             ]
 
+    def count_orders(
+        self,
+        symbol: str | None = None,
+        order_type: str | None = None,
+    ) -> int:
+        with Session(self.engine) as session:
+            query = select(func.count()).select_from(OrderModel)
+            if symbol:
+                query = query.where(OrderModel.symbol == symbol)
+            if order_type:
+                query = query.where(OrderModel.order_type == order_type)
+            result = session.execute(query)
+            return result.scalar_one()
+
     def save_signal(self, signal: SignalRecord) -> None:
         with Session(self.engine) as session:
             existing = session.get(SignalModel, signal.id)
@@ -239,6 +267,19 @@ class SqlalchemyTradingStore(TradingRepository):
             models = result.scalars().all()
             return [self._signal_model_to_record(m) for m in models]
 
+    def count_signals(
+        self,
+        symbol: str | None = None,
+        severity_min: int | None = None,
+    ) -> int:
+        with Session(self.engine) as session:
+            query = select(func.count()).select_from(SignalModel)
+            if symbol:
+                query = query.where(SignalModel.symbol == symbol)
+            if severity_min is not None:
+                query = query.where(SignalModel.severity >= severity_min)
+            result = session.execute(query)
+            return result.scalar_one()
 
     def _signal_model_to_record(self, model) -> SignalRecord:
         return SignalRecord(

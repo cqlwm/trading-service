@@ -83,6 +83,14 @@ class TradingRepository(ABC):
         return self.list_positions(symbol, status, tag)
 
     @abstractmethod
+    def count_positions(
+        self,
+        status: str | None = None,
+        tag: str | None = None,
+    ) -> int:
+        """统计持仓总数。"""
+
+    @abstractmethod
     def save_order(self, order: OrderRecord) -> None:
         """保存订单"""
 
@@ -111,6 +119,14 @@ class TradingRepository(ABC):
         return self.list_orders(symbol, order_type, limit, offset)
 
     @abstractmethod
+    def count_orders(
+        self,
+        symbol: str | None = None,
+        order_type: str | None = None,
+    ) -> int:
+        """统计订单总数。"""
+
+    @abstractmethod
     def save_signal(self, signal: SignalRecord) -> None:
         """保存信号"""
 
@@ -133,6 +149,14 @@ class TradingRepository(ABC):
     ) -> list[SignalRecord]:
         """列出信号（别名，向后兼容）"""
         return self.list_signals(symbol, severity_min, limit, offset)
+
+    @abstractmethod
+    def count_signals(
+        self,
+        symbol: str | None = None,
+        severity_min: int | None = None,
+    ) -> int:
+        """统计信号总数。"""
 
     def transaction(self) -> "TransactionContext":
         """事务上下文管理器。

@@ -46,10 +46,13 @@ async def get_timeline(
     exchange: ExchangeDep,
     limit: int = 50,
     offset: int = 0,
-) -> list[dict[str, Any]]:
-    """获取全局交易活动时间线（信号+订单+平仓），按时间倒序。"""
+) -> dict[str, Any]:
+    """获取全局交易活动时间线（信号+订单+平仓），按时间倒序。
+
+    返回 {data: [...], total: N}。
+    """
     events = exchange.get_timeline(limit=limit, offset=offset)
-    return [
+    data = [
         {
             "timestamp": e.timestamp.isoformat(),
             "event_type": e.event_type,
@@ -57,6 +60,8 @@ async def get_timeline(
         }
         for e in events
     ]
+    total = exchange.db.count_signals() + exchange.db.count_orders()
+    return {"data": data, "total": total}
 
 
 @router.get("/story/{symbol}")

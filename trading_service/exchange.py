@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+import ccxt
+
 from trading_service.repository import (
     OrderRecord,
     PositionRecord,
@@ -13,6 +15,7 @@ from trading_service.repository import (
     TradingRepository,
 )
 from trading_service.types import OrderType, TradeDirection
+from trading_service.utils.symbol import Symbol
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +163,10 @@ class MockExchange:
             positions.append(Position.from_record(r, orders))
         return positions
 
+    def count_positions(self, status: str | None = None) -> int:
+        """统计持仓总数。"""
+        return self.db.count_positions(status=status)
+
     def get_position_context(self, position_id: str) -> dict[str, Any] | None:
         """获取持仓上下文（用于 API 响应）。"""
         pos = self.get_position(position_id)
@@ -292,9 +299,43 @@ class MockExchange:
         return events
 
     async def fetch_prices(self, symbols: list[str]) -> dict[str, float]:
-        """获取最新价格（占位实现 - 实际通过 news-service API 获取）。"""
-        # TODO: 通过 news-service API 获取价格
-        return {s: 0.0 for s in symbols}
+        """获取最新价格。
+
+        接受 binance 原生格式（BTCUSDT）或 ccxt 格式（BTC/USDT），
+        统一按 binance 原生格式作为 key 返回（与 DB 存储、策略层一致）。
+
+        通过 ccxt 调用 Binance 现货公开 ticker 接口，无需 API Key。
+        """
+        if not symbols:
+            return {}
+
+        # 归一化：统一转成 binance 格式作为 key，ccxt 格式作为查询用
+        normalized: dict[str, str] = {}  # binance_symbol -> ccxt_symbol
+        for s in symbols:
+            sym = Symbol.parse(s)
+            normalized[sym.binance()] = sym.ccxt()
+
+        ccxt_symbols = list(normalized.values())
+        exchange = ccxt.binance({"enableRateLimit": True, "timeout": 15000})
+
+        prices: dict[str, float] = {}
+        try:
+            tickers = exchange.fetch_tickers(ccxt_symbols)
+            for binance_sym, ccxt_sym in normalized.items():
+                ticker = tickers.get(ccxt_sym)
+                if ticker and ticker.get("last") is not None:
+                    prices[binance_sym] = float(ticker["last"])
+                else:
+                    prices[binance_sym] = 0.0
+        except Exception as e:
+            logger.warning(f"fetch_prices failed, falling back to entry prices: {e}")
+            # 失败时返回 0.0，调用方需自行容错
+            for binance_sym in normalized:
+                prices[binance_sym] = 0.0
+        finally:
+            exchange.close()
+
+        return prices
 
 
     def open_position(

@@ -13,7 +13,7 @@ export function PnLBadge({
   pnlPct: number
   priceUnavailable?: boolean
 }) {
-  const unavailable = priceUnavailable || (pnlPct === 0 && priceUnavailable)
+  const unavailable = priceUnavailable
   if (unavailable) {
     return <span className="text-muted-foreground">-</span>
   }

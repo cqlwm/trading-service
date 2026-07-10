@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any
 
 from trading_service.exchange import MockExchange, Position
-from trading_service.strategies.base import Strategy, StrategyConfig
+from trading_service.strategies.base import Strategy, StrategyAction, StrategyConfig
 from trading_service.pickers import ISymbolPicker
 from trading_service.types import TradeDirection, OrderType
 
@@ -34,11 +34,13 @@ class MartingaleStrategy(Strategy):
         super().__init__(exchange, config, symbol_picker)
         self.config: MartingaleConfig = config
 
-    async def execute(self) -> None:
+    async def execute(self) -> list[StrategyAction]:
         """执行策略。
-        
-        优先级：止损 → 止盈 → 加仓 → 开新仓
+
+        优先级：止损 -> 止盈 -> 加仓 -> 开新仓
+        返回执行的动作列表。
         """
+        actions: list[StrategyAction] = []
         positions = self.exchange.get_positions(tag="martingale", status="open")
         current_position_count = len(positions)
 
@@ -50,15 +52,29 @@ class MartingaleStrategy(Strategy):
                 if current_price > 0:
                     # 1. 先检查止损 - 最高优先级
                     if self._check_stop_loss(position, current_price):
+                        actions.append(StrategyAction(
+                            type="close",
+                            symbol=position.symbol,
+                            detail=f"止损平仓 @ {current_price}",
+                        ))
                         continue  # 已平仓，跳过后续检查
                     # 2. 再检查止盈
                     if self._check_take_profit(position, current_price):
+                        actions.append(StrategyAction(
+                            type="close",
+                            symbol=position.symbol,
+                            detail=f"止盈平仓 @ {current_price}",
+                        ))
                         continue
                     # 3. 最后检查加仓
-                    self._check_and_add(position, current_price)
+                    add_action = self._check_and_add(position, current_price)
+                    if add_action:
+                        actions.append(add_action)
 
         if current_position_count < self.config.max_positions:
-            await self._open_new_positions(current_position_count)
+            actions.extend(await self._open_new_positions(current_position_count))
+
+        return actions
 
     def _check_stop_loss(self, position: Position, current_price: float) -> bool:
         """检查是否应该止损平仓。返回 True 表示已平仓。"""
@@ -84,15 +100,16 @@ class MartingaleStrategy(Strategy):
             return True
         return False
 
-    async def _open_new_positions(self, current_count: int) -> None:
+    async def _open_new_positions(self, current_count: int) -> list[StrategyAction]:
         """开新仓位逻辑。"""
+        actions: list[StrategyAction] = []
         symbol_infos = await self.symbol_picker.pick()
         positions = self.exchange.get_positions(tag="martingale", status="open")
         occupied_symbols = {p.symbol for p in positions}
         available_infos = [s for s in symbol_infos if s.symbol not in occupied_symbols]
 
         if not available_infos:
-            return
+            return actions
 
         symbols = [s.symbol for s in available_infos]
         prices = await self.exchange.fetch_prices(symbols)
@@ -110,14 +127,20 @@ class MartingaleStrategy(Strategy):
                     tag="martingale",
                     reason="martingale_initial_entry",
                 )
+                actions.append(StrategyAction(
+                    type="open",
+                    symbol=info.symbol,
+                    detail=f"开仓 @ {price}",
+                ))
+        return actions
 
-    def _check_and_add(self, position: Position, current_price: float) -> None:
-        """检查是否应该加仓，如果需要则执行加仓。"""
+    def _check_and_add(self, position: Position, current_price: float) -> StrategyAction | None:
+        """检查是否应该加仓，如果需要则执行加仓。返回动作记录或 None。"""
         add_orders = [o for o in position.orders if o.order_type == OrderType.ADD]
         add_count = len(add_orders)
 
         if add_count >= self.config.safety_order_count:
-            return
+            return None
 
         add_target_count = add_count + 1
         drop_pct = self.config.safety_order_step_scale * add_target_count / 100
@@ -132,6 +155,12 @@ class MartingaleStrategy(Strategy):
                 price=current_price,
                 reason=f"safety_order_{add_target_count}",
             )
+            return StrategyAction(
+                type="add",
+                symbol=position.symbol,
+                detail=f"第 {add_target_count} 次加仓 @ {current_price}",
+            )
+        return None
 
     def get_status(self) -> dict[str, Any]:
         """获取策略状态。"""
@@ -141,7 +170,10 @@ class MartingaleStrategy(Strategy):
                 "max_positions": self.config.max_positions,
                 "base_order_size": self.config.base_order_size,
                 "safety_order_count": self.config.safety_order_count,
+                "safety_order_step_scale": self.config.safety_order_step_scale,
+                "safety_order_volume_scale": self.config.safety_order_volume_scale,
                 "take_profit_pct": self.config.take_profit_pct,
+                "stop_loss_pct": self.config.stop_loss_pct,
             },
             "open_positions": len([p for p in positions if p.status == "open"]),
             "total_positions": len(positions),

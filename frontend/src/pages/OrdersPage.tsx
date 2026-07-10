@@ -28,11 +28,12 @@ export function OrdersPage() {
       orderType: orderType || undefined,
     })
 
-  const orders = data?.pages.flat() ?? []
+  const orders = data?.pages.flatMap((p) => p.data) ?? []
+  const total = data?.pages[0]?.total ?? 0
 
   return (
     <div>
-      <PageHeader title="订单" description="订单流水记录" />
+      <PageHeader title="订单" description={`订单流水记录 · 共 ${total} 条`} />
       <div className="px-6 pb-6">
         {/* 筛选栏 */}
         <FilterBar className="mb-4">

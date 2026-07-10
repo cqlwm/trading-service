@@ -1,3 +1,4 @@
+import { useIsFetching, useIsMutating } from '@tanstack/react-query'
 import { NavLink, Outlet } from 'react-router-dom'
 import {
   Activity,
@@ -17,7 +18,37 @@ const navItems: { to: string; label: string; icon: typeof Activity; end?: boolea
   { to: '/signals', label: '信号', icon: Megaphone },
   { to: '/strategies', label: '策略', icon: Activity },
   { to: '/timeline', label: '时间线', icon: Radio },
-]
+] as const
+
+/** 连接状态指示灯 */
+function ConnectionStatus() {
+  // isFetching > 0 表示有请求在进行中
+  const isFetching = useIsFetching()
+  const isMutating = useIsMutating()
+
+  const busy = isFetching > 0 || isMutating > 0
+
+  return (
+    <div className="flex items-center gap-2 border-t border-border px-4 py-3 text-xs text-muted-foreground">
+      <span
+        className={cn(
+          'relative flex h-2 w-2',
+        )}
+      >
+        {busy && (
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+        )}
+        <span
+          className={cn(
+            'relative inline-flex h-2 w-2 rounded-full',
+            busy ? 'bg-primary' : 'bg-success',
+          )}
+        />
+      </span>
+      <span className="hidden lg:inline">{busy ? '同步中...' : '已连接'}</span>
+    </div>
+  )
+}
 
 export function AppShell() {
   return (
@@ -55,6 +86,7 @@ export function AppShell() {
             )
           })}
         </nav>
+        <ConnectionStatus />
       </aside>
 
       {/* 主内容区 */}

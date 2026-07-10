@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
-from trading_service.api.deps import ExchangeDep
+from trading_service.api.deps import get_exchange
 from trading_service.exchange import MockExchange
 
 router = APIRouter(tags=["orders"])
@@ -15,16 +15,19 @@ async def list_orders(
     order_type: str | None = None,
     limit: int = 50,
     offset: int = 0,
-    exchange: MockExchange = Depends(ExchangeDep),
-) -> list[dict[str, Any]]:
-    """查询订单列表，支持按 symbol/order_type 过滤和分页。"""
+    exchange: MockExchange = Depends(get_exchange),
+) -> dict[str, Any]:
+    """查询订单列表，支持按 symbol/order_type 过滤和分页。
+
+    返回 {data: [...], total: N}，total 为符合筛选条件的总数。
+    """
     orders = exchange.get_orders_filtered(
         symbol=symbol,
         order_type=order_type,
         limit=limit,
         offset=offset,
     )
-    return [
+    data = [
         {
             "id": o.id,
             "position_id": o.position_id,
@@ -38,3 +41,5 @@ async def list_orders(
         }
         for o in orders
     ]
+    total = exchange.db.count_orders(symbol=symbol, order_type=order_type)
+    return {"data": data, "total": total}

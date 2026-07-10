@@ -36,11 +36,22 @@ export function useExecuteStrategy(strategy: 'martingale' | 'micro-cap') {
     strategy === 'martingale'
       ? ENDPOINTS.martingaleExecute
       : ENDPOINTS.microCapExecute
+  const label = strategy === 'martingale' ? '马丁' : '微市值'
 
   return useMutation<StrategyExecuteResponse, Error>({
     mutationFn: () => apiPost<StrategyExecuteResponse>(endpoint),
-    onSuccess: () => {
-      toast.success(`${strategy === 'martingale' ? '马丁' : '微市值'}策略执行完成`)
+    onSuccess: (data) => {
+      // 根据执行的动作数量给出不同反馈
+      if (data.action_count === 0) {
+        toast.info(`${label}策略执行完成，本轮无操作`)
+      } else {
+        const summary = data.actions
+          .map((a) => `${a.symbol} ${a.detail}`)
+          .join('\n')
+        toast.success(`${label}策略执行完成，共 ${data.action_count} 项操作：\n${summary}`, {
+          duration: 6000,
+        })
+      }
       // 策略执行后刷新所有相关数据
       qc.invalidateQueries({ queryKey: ['positions'] })
       qc.invalidateQueries({ queryKey: ['orders'] })

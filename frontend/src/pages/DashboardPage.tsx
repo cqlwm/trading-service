@@ -10,11 +10,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { MarketDirectionBadge } from '@/components/ui/DirectionBadges'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ENDPOINTS } from '@/lib/constants'
-import { formatDateTime, formatRelative } from '@/lib/format'
+import { formatRelative } from '@/lib/format'
 import { useMartingaleStatus, useMicroCapStatus } from '@/hooks/useStrategies'
 import { usePositions } from '@/hooks/usePositions'
 import { useRecentSignals } from '@/hooks/useSignals'
-import type { Order, Signal } from '@/types'
+import type { Order, PaginatedResponse } from '@/types'
 
 export function DashboardPage() {
   const positions = usePositions('all')
@@ -25,10 +25,15 @@ export function DashboardPage() {
   // 最近订单（单独查询，limit=5）
   const recentOrders = useQuery<Order[]>({
     queryKey: ['orders-recent', 5],
-    queryFn: () => apiGet<Order[]>(`${ENDPOINTS.orders}?limit=5`),
+    queryFn: async () => {
+      const resp = await apiGet<PaginatedResponse<Order>>(
+        `${ENDPOINTS.orders}?limit=5`,
+      )
+      return resp.data
+    },
   })
 
-  const allPositions = positions.data ?? []
+  const allPositions = positions.data?.data ?? []
   const openCount = allPositions.filter((p) => p.status === 'open').length
   const closedCount = allPositions.filter((p) => p.status === 'closed').length
 
@@ -90,10 +95,10 @@ export function DashboardPage() {
             <CardContent className="space-y-2">
               {recentSignals.isLoading ? (
                 <Skeleton className="h-20" />
-              ) : (recentSignals.data?.pages[0] ?? []).length === 0 ? (
+              ) : (recentSignals.data ?? []).length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted-foreground">暂无信号</p>
               ) : (
-                (recentSignals.data?.pages[0] ?? []).map((sig: Signal) => (
+                (recentSignals.data ?? []).map((sig) => (
                   <div
                     key={sig.id}
                     className="flex items-center gap-3 rounded-md border border-border/60 p-2 text-sm"
@@ -143,9 +148,6 @@ export function DashboardPage() {
                     </span>
                     <span className="tabular-nums text-muted-foreground">
                       {order.size} @ {order.price}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {formatDateTime(order.created_at)}
                     </span>
                   </div>
                 ))

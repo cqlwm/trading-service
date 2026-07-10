@@ -1,8 +1,8 @@
-import { useInfiniteQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 
 import { apiGet, buildQuery } from '@/api/client'
 import { ENDPOINTS, PAGE_SIZE } from '@/lib/constants'
-import type { Signal } from '@/types'
+import type { PaginatedResponse, Signal } from '@/types'
 
 interface SignalsParams {
   symbol?: string
@@ -14,10 +14,10 @@ interface SignalsParams {
  * 注意后端参数名为 severity_min（非 min_severity）。
  */
 export function useSignals(params: SignalsParams = {}) {
-  return useInfiniteQuery<Signal[]>({
+  return useInfiniteQuery<PaginatedResponse<Signal>>({
     queryKey: ['signals', params.symbol, params.severityMin],
     queryFn: ({ pageParam }) =>
-      apiGet<Signal[]>(
+      apiGet<PaginatedResponse<Signal>>(
         ENDPOINTS.signals +
           buildQuery({
             symbol: params.symbol,
@@ -28,22 +28,22 @@ export function useSignals(params: SignalsParams = {}) {
       ),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
-      if (lastPage.length < PAGE_SIZE) return undefined
-      return allPages.length * PAGE_SIZE
+      const loaded = allPages.reduce((sum, p) => sum + p.data.length, 0)
+      if (loaded >= lastPage.total) return undefined
+      return loaded
     },
   })
 }
 
 /** 最近 N 条信号（Dashboard 用） */
 export function useRecentSignals(limit = 5) {
-  return useInfiniteQuery<Signal[]>({
+  return useQuery<Signal[]>({
     queryKey: ['signals-recent', limit],
-    queryFn: ({ pageParam }) =>
-      apiGet<Signal[]>(
-        ENDPOINTS.signals + buildQuery({ limit, offset: (pageParam as number) ?? 0 }),
-      ),
-    initialPageParam: 0,
-    getNextPageParam: (lastPage) =>
-      lastPage.length < limit ? undefined : limit,
+    queryFn: async () => {
+      const resp = await apiGet<PaginatedResponse<Signal>>(
+        ENDPOINTS.signals + buildQuery({ limit }),
+      )
+      return resp.data
+    },
   })
 }

@@ -113,6 +113,13 @@ class InMemoryTradingRepository(TradingRepository):
     ) -> list[PositionRecord]:
         return self.list_positions(symbol=symbol, status=status, tag=tag)
 
+    def count_positions(
+        self,
+        status: str | None = None,
+        tag: str | None = None,
+    ) -> int:
+        return len(self.list_positions(status=status, tag=tag))
+
     def save_order(self, order: OrderRecord) -> None:
         if self._in_transaction:
             self._temp_orders[order.id] = order
@@ -156,6 +163,18 @@ class InMemoryTradingRepository(TradingRepository):
         results = self.list_orders(symbol=symbol, order_type=order_type, limit=limit + offset)
         return results[offset:offset + limit]
 
+    def count_orders(
+        self,
+        symbol: str | None = None,
+        order_type: str | None = None,
+    ) -> int:
+        results = list(self.orders.values())
+        if symbol:
+            results = [r for r in results if r.symbol == symbol]
+        if order_type:
+            results = [r for r in results if r.order_type == order_type]
+        return len(results)
+
     def save_signal(self, signal: SignalRecord) -> None:
         self.signals[signal.id] = signal
 
@@ -182,6 +201,18 @@ class InMemoryTradingRepository(TradingRepository):
     ) -> list[SignalRecord]:
         results = self.list_signals(symbol=symbol, severity_min=severity_min, limit=limit + offset)
         return results[offset:offset + limit]
+
+    def count_signals(
+        self,
+        symbol: str | None = None,
+        severity_min: int | None = None,
+    ) -> int:
+        results = list(self.signals.values())
+        if symbol:
+            results = [r for r in results if r.symbol == symbol]
+        if severity_min:
+            results = [r for r in results if r.severity >= severity_min]
+        return len(results)
 
 
 @pytest.fixture

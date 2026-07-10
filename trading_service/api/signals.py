@@ -15,15 +15,18 @@ async def list_signals(
     severity_min: int | None = None,
     limit: int = 50,
     offset: int = 0,
-) -> list[dict[str, Any]]:
-    """查询信号列表，支持按 symbol/severity 过滤和分页。"""
+) -> dict[str, Any]:
+    """查询信号列表，支持按 symbol/severity 过滤和分页。
+
+    返回 {data: [...], total: N}，total 为符合筛选条件的总数。
+    """
     signals = exchange.get_signals_filtered(
         symbol=symbol,
         severity_min=severity_min,
         limit=limit,
         offset=offset,
     )
-    return [
+    data = [
         {
             "id": s.id,
             "symbol": s.symbol,
@@ -36,3 +39,5 @@ async def list_signals(
         }
         for s in signals
     ]
+    total = exchange.db.count_signals(symbol=symbol, severity_min=severity_min)
+    return {"data": data, "total": total}

@@ -9,6 +9,15 @@ from trading_service.pickers import ISymbolPicker
 
 
 @dataclass
+class StrategyAction:
+    """策略执行动作记录，用于 API 响应反馈。"""
+
+    type: str  # "open" | "add" | "close" | "skip"
+    symbol: str
+    detail: str = ""
+
+
+@dataclass
 class StrategyConfig:
     """策略配置基类。"""
 
@@ -27,8 +36,8 @@ class Strategy(ABC):
         self.symbol_picker = symbol_picker
 
     @abstractmethod
-    async def execute(self) -> None:
-        """执行策略。"""
+    async def execute(self) -> list[StrategyAction]:
+        """执行策略，返回执行的动作列表。"""
 
     @abstractmethod
     def get_status(self) -> dict[str, Any]:
