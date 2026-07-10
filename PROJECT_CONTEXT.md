@@ -28,6 +28,17 @@ trading_service/
 ├── exchange.py        # Mock交易所实现
 └── config.py
 
+frontend/              # ✅ 前端独立项目（React 19 + Vite 8 + TS + TanStack Query）
+├── src/
+│   ├── api/client.ts           # 统一 fetch 封装（超时/错误归一化）
+│   ├── types/index.ts          # 镜像后端枚举与模型（含 PaginatedResponse）
+│   ├── hooks/                  # TanStack Query 数据层（usePositions/useOrders/...）
+│   ├── components/             # ui/ + layout/ + positions/ + strategies/ + dashboard/
+│   ├── pages/                  # 6 页：Dashboard/Positions/Orders/Signals/Strategies/Timeline
+│   └── lib/                    # constants(端点+轮询) / format(容错格式化) / cn
+├── vite.config.ts     # /api 代理到 127.0.0.1:8001
+└── tailwind.config.js # 暗色主题 + shadcn CSS 变量体系
+
 demo/                   # 展示/运维脚本（不进 pyright/测试）
 ├── demo_picker.py               # 基础选币演示
 ├── demo_technical_picker.py     # 技术分析选币（含下架预警展示）
@@ -78,6 +89,34 @@ class SymbolInfo:
 - 二元盈亏结构：赢 +10×TP%，输 ≈ -10×loss_pct（下架清算，非精确-100%）
 
 # -----------------------
+# 🌐 前后端 API 协议（2026-07-10 联调确定）
+# -----------------------
+
+## 统一分页格式
+所有列表端点返回 `{data: [...], total: N}`（不是裸数组！不是文档里的旧格式！）
+- Repository 层有 count_positions/count_orders/count_signals 方法
+- 前端用 useInfiniteQuery，以 loaded >= total 判断是否到底
+
+## 端点与参数（以实际代码为准，非 architecture_document/05-api-design.md）
+| 端点 | 关键点 |
+|------|--------|
+| GET /api/positions | 仅支持 `status` 参数（不支持 tag/symbol/limit/offset）；列表含 current_price/pnl_pct/source/layers |
+| GET /api/positions/{id} | 详情**不含** current_price/pnl_pct（前端复用列表缓存） |
+| POST /api/positions/{id}/close | 无请求体，固定 reason:"manual" |
+| GET /api/signals | 参数名 `severity_min`（**非** min_severity） |
+| POST /api/strategies/*/execute | 返回 `{actions:[{type,symbol,detail}], action_count}` |
+| GET /api/strategies/*/status | 含完整 config 字段（含 stop_loss_pct 等） |
+
+## direction 语义区分（不要混用！）
+- Position/Order.direction: `long` / `short`（TradeDirection 枚举）
+- Signal.direction: `bullish` / `bearish` / `neutral`（MarketDirection 枚举）
+
+## 策略 execute 契约（2026-07-10 改动）
+- Strategy.execute() 返回 `list[StrategyAction]`（不再是 None）
+- StrategyAction = dataclass(type, symbol, detail)，type: "open"/"add"/"close"/"skip"
+- API 层透传 actions，前端 toast 展示具体操作明细
+
+# -----------------------
 # ⚠️ 常见陷阱检查清单（踩过的坑！）
 # -----------------------
 1. ❌ 不要再在 strategies/ 下创建 symbol_picker.py！统一在 pickers/
@@ -122,12 +161,49 @@ class SymbolInfo:
     - TAKE_PROFIT_MARKET: 市价条件止盈单，stopPrice+closePosition(整仓)。
 
 # -----------------------
+# 🔧 前后端联调踩过的坑（2026-07-10）
+# -----------------------
+16. ⚠️ fetch_prices() 曾经是空实现（返回全 0.0），导致：
+    - 持仓盈亏全是 -100%（(0-entry)/entry*100）
+    - 策略开仓条件 `if price > 0` 永远不满足，策略执行无效
+    已修复：用 ccxt 同步调用 Binance 现货 fetch_tickers 获取真实价格。
+17. ⚠️ ccxt 4.5.64 的 fetch_tickers / close 是**同步方法**，不是协程！
+    不要 `await exchange.fetch_tickers(...)`，会报 'dict' object can't be awaited。
+    fetch_prices 虽然是 async def，但内部直接同步调用 ccxt 即可。
+18. ⚠️ config.yaml 里 db_path: "~/projects/db/news.db" 的 `~` 不会被 SQLAlchemy 展开！
+    必须在 config.py 里 `settings.db_path = str(Path(settings.db_path).expanduser())`。
+    否则报 sqlite3.OperationalError: unable to open database file。
+19. ⚠️ FastAPI 依赖注入：`ExchangeDep = Annotated[MockExchange, Depends(get_exchange)]`
+    使用时直接 `exchange: ExchangeDep` 即可，**不要**再包 `Depends(ExchangeDep)`！
+    `Depends(ExchangeDep)` 会把 Annotated 类型当 callable 调用，报 "Field required: args, kwargs"。
+    如果参数前面有带默认值的参数（如 offset=0），无默认值参数不能跟在后面，
+    此时用 `exchange: MockExchange = Depends(get_exchange)` 方式。
+20. ⚠️ 符号格式不统一曾导致价格取不到：
+    - DB 存储/策略层用 binance 原生格式（BTCUSDT）
+    - ccxt 用斜杠格式（BTC/USDT）
+    - fetch_prices 现在内部用 Symbol.parse() 归一化，统一以 binance 格式为 key 返回
+    - positions.py 不要再把 symbol 转 ccxt 格式去查 prices dict！直接用 p.symbol。
+
+# -----------------------
 # 📝 命名约定
 # -----------------------
 - 类名: PascalCase (AlphaTokenSource, SelectionPipeline, BinanceFutureKline)
 - 方法/函数: snake_case (pick, _pick_sync, get_future_klines)
 - 私有方法: 下划线前缀 (_pick_sync, _analyze_symbol)
 - 测试文件: test_*.py
+
+# -----------------------
+# 🚀 开发命令
+# -----------------------
+## 后端
+uv run python main.py                    # 启动 :8001
+.venv/bin/pyright                        # 类型检查（必须 0 errors）
+.venv/bin/python -m pytest tests/ -q     # 测试（213 passed, ~1.5s）
+
+## 前端（frontend/ 目录下）
+npm run dev                              # 启动 :5173，代理 /api -> :8001
+npx tsc --noEmit -p tsconfig.app.json    # 类型检查
+npm run build                            # 生产构建
 
 # -----------------------
 # 📌 关于这个文件
