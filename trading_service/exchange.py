@@ -202,6 +202,7 @@ class MockExchange:
         price: float | None = None,
         reason_text: str = "手动平仓",
         reason_data: dict[str, object] | None = None,
+        signal_ids: list[str] | None = None,
         execution_id: str = "",
     ) -> CloseResult | None:
         """平仓 - 关闭持仓并创建 CLOSE 订单 + 动作记录（原子事务）。"""
@@ -243,6 +244,7 @@ class MockExchange:
                 order_id=order_id,
                 reason_text=reason_text,
                 reason_data=reason_data or {},
+                signal_ids=signal_ids or [],
             ))
 
         return CloseResult(
@@ -266,13 +268,14 @@ class MockExchange:
     def get_signals_filtered(
         self,
         symbol: str | None = None,
+        signal_type: str | None = None,
         severity_min: int | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[SignalRecord]:
         """过滤查询信号。"""
         return self.db.get_signals_filtered(
-            symbol=symbol, severity_min=severity_min, limit=limit, offset=offset
+            symbol=symbol, signal_type=signal_type, severity_min=severity_min, limit=limit, offset=offset
         )
 
     def get_timeline(
@@ -360,6 +363,7 @@ class MockExchange:
         tag: str,
         reason_text: str = "",
         reason_data: dict[str, object] | None = None,
+        signal_ids: list[str] | None = None,
         execution_id: str = "",
     ) -> Position:
         """开仓 - 创建持仓、OPEN 订单和动作记录（原子事务）。"""
@@ -398,6 +402,7 @@ class MockExchange:
                 order_id=order_id,
                 reason_text=reason_text,
                 reason_data=reason_data or {},
+                signal_ids=signal_ids or [],
             ))
 
         return position
@@ -409,6 +414,7 @@ class MockExchange:
         price: float,
         reason_text: str = "",
         reason_data: dict[str, object] | None = None,
+        signal_ids: list[str] | None = None,
         execution_id: str = "",
     ) -> Position:
         """加仓 - 增加持仓数量、创建 ADD 订单和动作记录（原子事务）。"""
@@ -451,6 +457,7 @@ class MockExchange:
                 order_id=order_id,
                 reason_text=reason_text,
                 reason_data=reason_data or {},
+                signal_ids=signal_ids or [],
             ))
 
         return position

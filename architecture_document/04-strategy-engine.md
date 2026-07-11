@@ -402,9 +402,54 @@ graph TD
 
 ---
 
-## 7. 策略执行流程
+## 7. 信号检测器（SignalDetector）
 
-### 6.1 通用执行流程
+信号检测器与策略平行，由调度器统一管理。产出信号落盘到 `trading_signals` 表。
+
+### 7.1 设计定位
+
+```
+调度器（cron）
+  ├─ 信号检测器（先跑）-> 产出信号 -> 落盘 trading_signals
+  └─ 策略（后跑）-> 拉取信号 -> 决策 -> 动作记录（含 signal_ids）+ 订单
+```
+
+- **信号检测器**：扫描市场，产出观察信号（如金叉、死叉、连涨3日）
+- **策略**：从数据库拉取信号作为决策输入，策略自身持仓检查天然防止重复交易
+- **信号可不被消费**：内容型信号（如连涨3日）只落盘，供 LLM 生成贴文
+
+### 7.2 信号检测器基类
+
+```python
+class SignalDetector(ABC):
+    name: str = ""   # 检测器标识
+    cron: str = ""   # cron 表达式
+
+    def __init__(self, repo: TradingRepository) -> None: ...
+
+    @abstractmethod
+    async def detect(self) -> list[SignalResult]: ...
+
+    def get_status(self) -> dict[str, Any]: ...
+```
+
+### 7.3 已实现的检测器
+
+| 检测器 | name | cron | 产出信号 |
+|--------|------|------|----------|
+| 技术分析信号检测器 | `technical_signal` | 每5分钟 | `golden_cross`（金叉）、`dead_cross`（死叉）、`sideways_bottom`（底部横盘）|
+
+### 7.4 新增信号检测器步骤
+
+1. 继承 `SignalDetector`，设 `name` 和 `cron` 类属性
+2. 实现 `detect()` 方法，返回 `list[SignalResult]`
+3. 在 `api/deps.py` 实例化并传入 `StrategyScheduler(detectors=[...])`
+
+---
+
+## 8. 策略执行流程
+
+### 8.1 通用执行流程
 
 ```mermaid
 flowchart TB
@@ -429,17 +474,16 @@ flowchart TB
     Result --> End([结束])
 ```
 
-### 6.2 策略触发方式
+### 8.2 策略触发方式
 
 | 触发方式 | 说明 | 实现 |
 |----------|------|------|
 | **API 触发** | 显式调用策略接口 | `POST /api/strategies/{name}/execute` |
-| **定时任务** | News Service Cron 定时调用 | 由 News Service 调度 |
-| **信号触发** | 基于 News Service 事件触发 | Webhook / 轮询 |
+| **定时调度** | 调度器 cron 定时触发 | `StrategyScheduler._execute_strategy` |
 
 ---
 
-## 8. 策略状态报告
+## 9. 策略状态报告
 
 每个策略必须实现 `get_status()` 方法，返回结构化状态信息。
 

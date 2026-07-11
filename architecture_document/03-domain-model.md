@@ -250,6 +250,9 @@ CREATE INDEX idx_orders_created ON trading_orders(created_at DESC);
 
 ### 3.3 trading_signals (信号表)
 
+> **写入方**：Trading Service 的信号检测器（`SignalDetector` 子类），由调度器定时调度产出信号并落盘。
+> 信号可被策略消费（驱动交易），也可不被消费（仅用于内容生成/贴文）。
+
 **DDL**:
 ```sql
 CREATE TABLE trading_signals (
@@ -275,11 +278,11 @@ CREATE INDEX idx_signals_created ON trading_signals(created_at DESC);
 |------|------|------|------|
 | `id` | VARCHAR(12) | 信号ID | `"s1g2n3..."` |
 | `symbol` | VARCHAR(20) | 币种 | `"BTC"` |
-| `signal_type` | VARCHAR(50) | 信号类型 | `"news_surge"` |
+| `signal_type` | VARCHAR(50) | 信号类型 | `"golden_cross"` |
 | `direction` | VARCHAR(10) | 建议方向 | `"bullish"` |
 | `severity` | INTEGER | 严重度 (0-5) | `3` |
-| `description` | TEXT | 描述 | `"比特币 ETF 通过"` |
-| `metadata` | JSON | 扩展字段 | `{"source": "twitter", ...}` |
+| `description` | TEXT | 描述 | `"BTC 金叉向上穿越 SMA200"` |
+| `metadata` | JSON | 扩展字段 | `{"sma_200": 50000, ...}` |
 
 ---
 

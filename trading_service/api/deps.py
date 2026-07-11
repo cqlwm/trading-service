@@ -21,6 +21,7 @@ from trading_service.strategies.martingale import MartingaleConfig, MartingaleSt
 from trading_service.strategies.martingale_short import MartingaleShortStrategy
 from trading_service.strategies.micro_cap import MicroCapConfig, MicroCapStrategy
 from trading_service.clients import BinanceClient
+from trading_service.detectors.technical import TechnicalSignalDetector
 from trading_service.types import TradeDirection
 from trading_service.utils.symbol import Symbol
 
@@ -74,10 +75,14 @@ _martingale_short_strategy = MartingaleShortStrategy(
         ],
     ),
 )
-# 统一策略调度器（管理所有策略的定时执行）
+# 信号检测器（与策略平行，由调度器定时调度）
+_technical_signal_detector = TechnicalSignalDetector(repo=_trading_store, client=_micro_cap_client)
+
+# 统一策略调度器（管理所有策略和检测器的定时执行）
 _strategy_scheduler = StrategyScheduler(
     repo=_trading_store,
     strategies=[_martingale_strategy, _micro_cap_strategy, _martingale_short_strategy],
+    detectors=[_technical_signal_detector],
 )
 
 

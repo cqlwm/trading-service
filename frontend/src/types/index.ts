@@ -200,6 +200,7 @@ export interface StrategyActionRecord {
   order_id: string
   reason: string
   reason_data: Record<string, unknown>
+  signal_ids: string[]
   created_at: string
 }
 

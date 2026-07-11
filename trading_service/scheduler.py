@@ -15,12 +15,14 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from trading_service.repository import (
+    SignalRecord,
     StrategyActionRecord,
     StrategyExecutionRecord,
     StrategyScheduleRecord,
     TradingRepository,
 )
 from trading_service.strategies.base import Strategy, StrategyAction
+from trading_service.detectors.base import SignalDetector
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +64,17 @@ class StrategyScheduler:
     管理所有注册策略的定时执行，支持启动/停止/状态查询/执行历史。
     """
 
-    def __init__(self, repo: TradingRepository, strategies: list[Strategy]) -> None:
+    def __init__(
+        self,
+        repo: TradingRepository,
+        strategies: list[Strategy],
+        detectors: list[SignalDetector] | None = None,
+    ) -> None:
         self._repo = repo
         self._strategies: dict[str, Strategy] = {s.name: s for s in strategies if s.name}
+        self._detectors: dict[str, SignalDetector] = {
+            d.name: d for d in (detectors or []) if d.name
+        }
         self._scheduler = AsyncIOScheduler()
 
     def _now(self) -> str:
@@ -75,6 +85,9 @@ class StrategyScheduler:
 
     def _job_id(self, strategy_name: str) -> str:
         return f"strategy_{strategy_name}"
+
+    def _detector_job_id(self, detector_name: str) -> str:
+        return f"detector_{detector_name}"
 
     async def start(self) -> None:
         """启动调度器，并从数据库恢复 enabled 的策略。"""
@@ -90,6 +103,10 @@ class StrategyScheduler:
                 strategy = self._strategies[record.strategy_name]
                 self._add_job(strategy)
                 logger.info(f"恢复策略调度: {strategy.name} (cron={strategy.cron})")
+            elif record.enabled and record.strategy_name in self._detectors:
+                detector = self._detectors[record.strategy_name]
+                self._add_detector_job(detector)
+                logger.info(f"恢复检测器调度: {detector.name} (cron={detector.cron})")
 
     async def shutdown(self) -> None:
         """优雅停止调度器。"""
@@ -114,6 +131,23 @@ class StrategyScheduler:
     def _remove_job(self, strategy_name: str) -> None:
         """移除策略的定时任务。"""
         job_id = self._job_id(strategy_name)
+        if self._scheduler.get_job(job_id):
+            self._scheduler.remove_job(job_id)
+
+    def _add_detector_job(self, detector: SignalDetector) -> None:
+        """添加信号检测器的定时任务。"""
+        trigger = _parse_cron(detector.cron)
+        self._scheduler.add_job(
+            self._execute_detector,
+            trigger,
+            id=self._detector_job_id(detector.name),
+            replace_existing=True,
+            args=[detector.name],
+        )
+
+    def _remove_detector_job(self, detector_name: str) -> None:
+        """移除信号检测器的定时任务。"""
+        job_id = self._detector_job_id(detector_name)
         if self._scheduler.get_job(job_id):
             self._scheduler.remove_job(job_id)
 
@@ -146,14 +180,56 @@ class StrategyScheduler:
         logger.info(f"策略调度已停止: {strategy_name}")
         return True
 
+    def start_detector(self, detector_name: str) -> bool:
+        """启动信号检测器的定时调度。
+
+        Returns:
+            True 表示成功启动，False 表示检测器不存在。
+        """
+        detector = self._detectors.get(detector_name)
+        if detector is None:
+            return False
+
+        self._add_detector_job(detector)
+        self._persist_detector_schedule(detector_name, enabled=True)
+        logger.info(f"检测器调度已启动: {detector_name} (cron={detector.cron})")
+        return True
+
+    def stop_detector(self, detector_name: str) -> bool:
+        """停止信号检测器的定时调度。
+
+        Returns:
+            True 表示成功停止，False 表示检测器不存在。
+        """
+        if detector_name not in self._detectors:
+            return False
+
+        self._remove_detector_job(detector_name)
+        self._persist_detector_schedule(detector_name, enabled=False)
+        logger.info(f"检测器调度已停止: {detector_name}")
+        return True
+
     def _persist_schedule(self, strategy_name: str, enabled: bool) -> None:
-        """持久化调度状态。"""
+        """持久化策略调度状态。"""
         strategy = self._strategies[strategy_name]
         existing = self._repo.get_schedule(strategy_name)
         now = datetime.now(timezone.utc)
         self._repo.save_schedule(StrategyScheduleRecord(
             strategy_name=strategy_name,
             cron=strategy.cron,
+            enabled=enabled,
+            created_at=existing.created_at if existing else now,
+            updated_at=now,
+        ))
+
+    def _persist_detector_schedule(self, detector_name: str, enabled: bool) -> None:
+        """持久化检测器调度状态。"""
+        detector = self._detectors[detector_name]
+        existing = self._repo.get_schedule(detector_name)
+        now = datetime.now(timezone.utc)
+        self._repo.save_schedule(StrategyScheduleRecord(
+            strategy_name=detector_name,
+            cron=detector.cron,
             enabled=enabled,
             created_at=existing.created_at if existing else now,
             updated_at=now,
@@ -282,6 +358,81 @@ class StrategyScheduler:
         result = []
         for name in self._strategies:
             schedule = self.get_strategy_schedule(name)
+            if schedule:
+                result.append(schedule)
+        return result
+
+    async def _execute_detector(self, detector_name: str) -> None:
+        """执行信号检测器，产出信号落盘（调度器回调）。"""
+        detector = self._detectors.get(detector_name)
+        if detector is None:
+            logger.warning(f"调度执行找不到检测器: {detector_name}")
+            return
+
+        logger.info(f"检测器 {detector_name} 定时执行开始")
+
+        try:
+            results = await detector.detect()
+            for result in results:
+                self._repo.save_signal(SignalRecord(
+                    id=self._new_id(),
+                    symbol=result.symbol,
+                    signal_type=result.signal_type,
+                    direction=result.direction,
+                    severity=result.severity,
+                    description=result.description,
+                    metadata_json=result.metadata,
+                ))
+            logger.info(f"检测器 {detector_name} 定时执行完成: 产出 {len(results)} 条信号")
+        except Exception as e:
+            logger.error(f"检测器 {detector_name} 定时执行失败: {e}", exc_info=True)
+
+    async def execute_detector_manually(self, detector_name: str) -> int:
+        """手动执行信号检测器，返回产出的信号数量。"""
+        detector = self._detectors.get(detector_name)
+        if detector is None:
+            raise ValueError(f"检测器不存在: {detector_name}")
+
+        logger.info(f"检测器 {detector_name} 手动执行开始")
+
+        results = await detector.detect()
+        for result in results:
+            self._repo.save_signal(SignalRecord(
+                id=self._new_id(),
+                symbol=result.symbol,
+                signal_type=result.signal_type,
+                direction=result.direction,
+                severity=result.severity,
+                description=result.description,
+                metadata_json=result.metadata,
+            ))
+        logger.info(f"检测器 {detector_name} 手动执行完成: 产出 {len(results)} 条信号")
+        return len(results)
+
+    def get_detector_schedule(self, detector_name: str) -> dict[str, Any] | None:
+        """获取信号检测器调度状态。"""
+        detector = self._detectors.get(detector_name)
+        if detector is None:
+            return None
+
+        record = self._repo.get_schedule(detector_name)
+        running = record is not None and record.enabled and self._scheduler.get_job(self._detector_job_id(detector_name)) is not None
+
+        job = self._scheduler.get_job(self._detector_job_id(detector_name))
+        next_run_at = job.next_run_time.isoformat() if job and job.next_run_time else None
+
+        return {
+            "detector_name": detector_name,
+            "running": running,
+            "cron": detector.cron,
+            "next_run_at": next_run_at,
+        }
+
+    def list_all_detectors(self) -> list[dict[str, Any]]:
+        """列出所有信号检测器的调度状态。"""
+        result = []
+        for name in self._detectors:
+            schedule = self.get_detector_schedule(name)
             if schedule:
                 result.append(schedule)
         return result

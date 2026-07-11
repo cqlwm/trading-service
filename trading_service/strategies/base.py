@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from trading_service.exchange import MockExchange
 from trading_service.pickers import ISymbolPicker
+from trading_service.repository import SignalRecord
 
 
 @dataclass
@@ -51,3 +52,18 @@ class Strategy(ABC):
     @abstractmethod
     def get_status(self) -> dict[str, Any]:
         """获取策略状态。"""
+
+    def get_recent_signals(
+        self,
+        symbol: str | None = None,
+        signal_type: str | None = None,
+        limit: int = 10,
+    ) -> list[SignalRecord]:
+        """拉取最近的信号（策略主动消费）。
+
+        信号是市场观察，不是命令。看到同一个信号多次不应导致重复操作，
+        策略自身的持仓检查（tag 隔离 + status 过滤）天然防止重复交易。
+        """
+        return self.exchange.db.list_signals(
+            symbol=symbol, signal_type=signal_type, limit=limit,
+        )

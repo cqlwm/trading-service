@@ -13,19 +13,44 @@ trading_service/
 │   ├── technical_analyzer.py    # ITechnicalAnalyzer / TechnicalAnalyzer 技术分析工具
 │   ├── technical_filter.py      # TechnicalAnalysisFilter（纯增强技术阶段）
 │   ├── signal.py                # 信号判定纯函数：is_notable_signal / is_delisting_soon
+│   ├── short_signal_filter.py   # 做空信号过滤器（死叉/远离均线）
 │   └── backtest.py              # 回测核心逻辑：simulate_trade / simulate_portfolio / summarize
+│
+├── detectors/         # ✅ 信号检测器（与策略平行，由调度器定时调度）
+│   ├── base.py                  # SignalDetector 基类 / SignalResult 数据类
+│   └── technical.py             # TechnicalSignalDetector（金叉/死叉/横盘信号检测）
 │
 ├── clients/           # 外部API客户端（币安等）
 │   ├── binance_client.py        # BinanceClient（同步阻塞IO，非async）
 │   └── protocols.py             # KlineClient / MarketDataClient 协议（结构化类型）
 │
 ├── strategies/        # 交易策略
-│   ├── BaseStrategy  # 所有策略基类，async框架
-│   ├── MartingaleStrategy
-│   └── MicroCapStrategy
+│   ├── base.py                  # Strategy 基类 + StrategyAction + StrategyConfig
+│   ├── martingale.py            # 马丁格尔做多策略
+│   ├── martingale_short.py      # 马丁格尔做空策略（继承做多）
+│   └── micro_cap.py             # 微市值策略（信号驱动：从 DB 拉取金叉信号决策）
 │
 ├── repository/        # 数据持久化层
-├── exchange.py        # Mock交易所实现
+│   ├── abc.py                   # Record dataclass + TradingRepository 抽象接口
+│   ├── sqlalchemy_impl.py       # SQLAlchemy 实现
+│   └── models/                  # ORM 模型
+│       ├── position.py          # trading_positions
+│       ├── order.py             # trading_orders（无 reason 字段）
+│       ├── signal.py            # trading_signals
+│       ├── schedule.py          # trading_strategy_schedules + trading_strategy_executions
+│       └── action.py            # trading_strategy_actions（动作记录，含 signal_ids）
+│
+├── api/               # API 层
+│   ├── deps.py                  # 依赖注入（策略+检测器+调度器全局单例装配）
+│   ├── positions.py             # 持仓 API
+│   ├── orders.py                # 订单 API（无 reason 字段）
+│   ├── signals.py               # 信号 API（支持 signal_type 过滤）
+│   ├── strategies.py            # 策略 API（执行/调度/执行历史）
+│   ├── detectors.py             # 检测器 API（start/stop/execute/list）
+│   └── timeline.py              # 时间线 API
+│
+├── exchange.py        # Mock交易所实现（开仓/加仓/平仓 均写入动作记录）
+├── scheduler.py       # 策略调度器（统一管理策略+检测器的定时调度）
 └── config.py
 
 frontend/              # ✅ 前端独立项目（React 19 + Vite 8 + TS + TanStack Query）
@@ -80,6 +105,14 @@ class SymbolInfo:
 - is_notable_signal(info) -> bool：金叉/靠近均线/横盘返回True，死叉/None返回False
 - is_delisting_soon(info) -> bool：delivery_date偏离哨兵值即True（即将下架）
 - PERPETUAL_DELIVERY_SENTINEL = 4133404800000（哨兵常量，定义在 symbol_picker.py）
+- 注意：这些是纯函数，操作内存 SymbolInfo。与 trading_signals 表无关。
+  trading_signals 表的信号由信号检测器（detectors/）产出落盘。
+
+## 信号检测器（detectors/）
+- SignalDetector 基类：与策略平行，由调度器定时调度，产出 SignalResult 落盘
+- TechnicalSignalDetector：产出 golden_cross/dead_cross/sideways_bottom 信号
+- 策略通过 `get_recent_signals(signal_type=...)` 从 DB 拉取信号做决策
+- 信号可不被消费（内容型信号只落盘，供 LLM 生成贴文）
 
 ## 回测核心逻辑（pickers/backtest.py）
 - simulate_trade(...)：单笔模拟（无资金约束），逐日判定止盈/下架/未决
@@ -89,7 +122,7 @@ class SymbolInfo:
 - 二元盈亏结构：赢 +10×TP%，输 ≈ -10×loss_pct（下架清算，非精确-100%）
 
 # -----------------------
-# 🌐 前后端 API 协议（2026-07-10 联调确定）
+# 🌐 前后端 API 协议（2026-07-11 重构后）
 # -----------------------
 
 ## 统一分页格式
@@ -100,21 +133,38 @@ class SymbolInfo:
 ## 端点与参数（以实际代码为准，非 architecture_document/05-api-design.md）
 | 端点 | 关键点 |
 |------|--------|
-| GET /api/positions | 仅支持 `status` 参数（不支持 tag/symbol/limit/offset）；列表含 current_price/pnl_pct/source/layers |
-| GET /api/positions/{id} | 详情**不含** current_price/pnl_pct（前端复用列表缓存） |
-| POST /api/positions/{id}/close | 无请求体，固定 reason:"manual" |
-| GET /api/signals | 参数名 `severity_min`（**非** min_severity） |
-| POST /api/strategies/*/execute | 返回 `{actions:[{type,symbol,detail}], action_count}` |
-| GET /api/strategies/*/status | 含完整 config 字段（含 stop_loss_pct 等） |
+| GET /api/positions | 仅支持 `status` 参数；列表含 current_price/pnl_pct/source/layers |
+| GET /api/positions/{id} | 详情**不含** current_price/pnl_pct；orders **不含** reason 字段 |
+| POST /api/positions/{id}/close | 无请求体；响应不含 reason（reason 已移至动作记录） |
+| GET /api/orders | 参数 `symbol`/`order_type`/`limit`/`offset`；**不含** reason 字段 |
+| GET /api/signals | 参数名 `severity_min` + `signal_type`（新增）；信号由 Trading Service 检测器产出 |
+| POST /api/strategies/*/execute | 通过调度器执行，返回 `{execution_id, actions:[{type,symbol,reason}], action_count}` |
+| GET /api/strategies/*/executions | 执行历史含 actions，每个 action 有 `signal_ids` 关联信号 |
+| GET /api/strategies/*/status | 含完整 config 字段（含 stop_loss_pct 等）+ schedule |
+| GET /api/detectors | 列出所有信号检测器状态 |
+| POST /api/detectors/{name}/start|stop|execute | 检测器启停和手动执行 |
+| GET /api/timeline | 信号+订单混排（不含 reason） |
 
 ## direction 语义区分（不要混用！）
 - Position/Order.direction: `long` / `short`（TradeDirection 枚举）
 - Signal.direction: `bullish` / `bearish` / `neutral`（MarketDirection 枚举）
 
-## 策略 execute 契约（2026-07-10 改动）
-- Strategy.execute() 返回 `list[StrategyAction]`（不再是 None）
-- StrategyAction = dataclass(type, symbol, detail)，type: "open"/"add"/"close"/"skip"
-- API 层透传 actions，前端 toast 展示具体操作明细
+## 策略 execute 契约（2026-07-11 重构后）
+- `Strategy.execute(execution_id="")` 返回 `list[StrategyAction]`
+- `StrategyAction = dataclass(type, symbol, reason)`，type: "open"/"add"/"close"/"skip"
+- `reason` 字段（原 `detail`）是决策描述，与动作记录的 `reason_text` 语义统一
+- execution_id 透传给 exchange，关联动作记录到调度轮次
+
+## 三层事件流架构（2026-07-11 重构核心设计）
+```
+观察层（信号）         决策层（动作）         事实层（订单）
+SignalRecord    ->    StrategyActionRecord  ->   OrderRecord
+（trading_signals）   （trading_strategy_actions）（trading_orders）
+```
+- **信号**：由信号检测器产出落盘，策略主动拉取消费，也可不被消费（内容生成用）
+- **动作记录**：MockExchange 在开仓/加仓/平仓时写入，含 reason_text + reason_data + signal_ids
+- **订单**：纯交易事实（不含 reason，reason 已移至动作记录）
+- **故事线**：`list_actions_by_position` / `list_actions_by_symbol` 按时间正序返回完整交易故事
 
 # -----------------------
 # ⚠️ 常见陷阱检查清单（踩过的坑！）
@@ -140,6 +190,29 @@ class SymbolInfo:
     回测的绝对盈亏不可信，只有相对结论（TP之间比较）有参考价值。
 12. ⚠️ 回测资金约束：simulate_portfolio 按100U/10仓约束，止盈释放资金可复用，
     下架不释放。同一代币可叠加加仓。不要用 simulate_trade 做资金约束回测！
+
+# -----------------------
+# 🏗️ 三层事件流 + 信号检测器架构（2026-07-11 重构）
+# -----------------------
+21. ⚠️ Order 表**不含** reason 字段！下单原因（决策上下文）已移至
+    `trading_strategy_actions` 表的 `reason_text` + `reason_data`。
+    不要在 OrderRecord/OrderModel 上加回 reason！
+22. ⚠️ `StrategyExecutionRecord` **不含** `actions_json`！动作记录已拆到独立的
+    `trading_strategy_actions` 表，通过 `execution_id` 关联到轮次记录。
+    API 层负责 join 查询。
+23. ⚠️ 信号检测器（SignalDetector）与策略（Strategy）是**平行**的，不继承 Strategy！
+    - 检测器产出 SignalResult（观察），策略产出 StrategyAction（交易）
+    - 检测器只依赖 repo（写信号），不需要 exchange/symbol_picker
+    - 检测器在 deps.py 中传入 `StrategyScheduler(detectors=[...])`
+24. ⚠️ 微市值策略（MicroCapStrategy）**不再用 SymbolPicker 做信号过滤**！
+    策略从 DB 拉取 `golden_cross` 信号做决策。SymbolPicker 仍作为基类依赖传入，
+    但 execute() 内不调用 picker.pick()。
+25. ⚠️ 动作记录的 `signal_ids: list[str]` 可以关联多个信号（一个决策可基于多信号）。
+    策略持仓检查（tag 隔离 + status 过滤）天然防止重复交易，不需要信号层防重复。
+26. ⚠️ `sqlalchemy_impl.py` 的 `metadata_json` 读取时必须 `json.loads`（曾漏掉，已修复）。
+    `_signal_model_to_record` / `_action_model_to_record` 中所有 JSON 字段都要反序列化。
+27. ⚠️ 手动执行策略也产生执行记录！走 `scheduler.execute_strategy_manually()`，
+    不再直接调 `strategy.execute()`。手动执行也有 execution_id 关联动作记录。
 
 # -----------------------
 # 📈 币安合约下单陷阱（真实资金操作！踩过3个坑）
@@ -198,7 +271,9 @@ class SymbolInfo:
 ## 后端
 uv run python main.py                    # 启动 :8001
 .venv/bin/pyright                        # 类型检查（必须 0 errors）
-.venv/bin/python -m pytest tests/ -q     # 测试（213 passed, ~1.5s）
+.venv/bin/python -m pytest tests/ -q     # 测试（256 passed, ~1.6s）
+.venv/bin/alembic upgrade head           # 执行数据库迁移
+.venv/bin/alembic revision --autogenerate -m "描述"  # 生成迁移脚本
 
 ## 前端（frontend/ 目录下）
 npm run dev                              # 启动 :5173，代理 /api -> :8001

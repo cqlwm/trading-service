@@ -26,4 +26,5 @@ class StrategyActionModel(Base):
     order_id: Mapped[str] = mapped_column(String(32), nullable=False, default="")
     reason_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     reason_data: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    signal_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     created_at: Mapped[str] = mapped_column(Text, nullable=False)

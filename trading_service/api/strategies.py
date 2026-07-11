@@ -171,6 +171,7 @@ async def get_strategy_executions(
                     "order_id": a.order_id,
                     "reason": a.reason_text,
                     "reason_data": a.reason_data,
+                    "signal_ids": a.signal_ids,
                     "created_at": a.created_at.isoformat(),
                 }
                 for a in actions

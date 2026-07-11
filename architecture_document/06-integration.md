@@ -54,11 +54,13 @@ graph LR
 **Trading Service 只读 News Service 表**：
 - `market_klines` - K线数据
 - `market_rankings` - 市值排名
-- `news_articles` - 新闻文章（信号生成用）
+- `news_articles` - 新闻文章
 
-**News Service 只写 Trading Service 表**：
-- `trading_signals` - 写入交易信号
-- 不直接修改 `trading_positions` / `trading_orders`
+**Trading Service 自己管理 `trading_signals` 表**：
+- 信号由 Trading Service 的信号检测器（`SignalDetector` 子类）产出并落盘
+- 信号检测器与策略平行，由调度器定时调度
+- 信号可被策略消费（驱动交易），也可不被消费（仅用于内容生成）
+- 外部服务（如 News Service）如需传递信号，应通过 `POST /api/signals` API 调用，不直接写共享表
 
 ### 2.4 SQLite 并发注意事项
 

@@ -262,6 +262,7 @@ class SqlalchemyTradingStore(TradingRepository):
     def list_signals(
         self,
         symbol: str | None = None,
+        signal_type: str | None = None,
         severity_min: int | None = None,
         limit: int = 50,
         offset: int = 0,
@@ -270,6 +271,8 @@ class SqlalchemyTradingStore(TradingRepository):
             query = select(SignalModel)
             if symbol:
                 query = query.where(SignalModel.symbol == symbol)
+            if signal_type:
+                query = query.where(SignalModel.signal_type == signal_type)
             if severity_min is not None:
                 query = query.where(SignalModel.severity >= severity_min)
             query = query.order_by(SignalModel.created_at.desc()).limit(limit).offset(offset)
@@ -281,12 +284,15 @@ class SqlalchemyTradingStore(TradingRepository):
     def count_signals(
         self,
         symbol: str | None = None,
+        signal_type: str | None = None,
         severity_min: int | None = None,
     ) -> int:
         with Session(self.engine) as session:
             query = select(func.count()).select_from(SignalModel)
             if symbol:
                 query = query.where(SignalModel.symbol == symbol)
+            if signal_type:
+                query = query.where(SignalModel.signal_type == signal_type)
             if severity_min is not None:
                 query = query.where(SignalModel.severity >= severity_min)
             result = session.execute(query)
@@ -300,7 +306,7 @@ class SqlalchemyTradingStore(TradingRepository):
             direction=model.direction,
             severity=model.severity,
             description=model.description,
-            metadata_json=model.metadata_json or {},
+            metadata_json=json.loads(model.metadata_json) if model.metadata_json else {},
             created_at=self._str_to_dt(model.created_at),
         )
 
@@ -408,6 +414,7 @@ class SqlalchemyTradingStore(TradingRepository):
                 order_id=action.order_id,
                 reason_text=action.reason_text,
                 reason_data=json.dumps(action.reason_data),
+                signal_ids=json.dumps(action.signal_ids),
                 created_at=self._dt_to_str(action.created_at),
             )
             session.add(model)
@@ -424,6 +431,7 @@ class SqlalchemyTradingStore(TradingRepository):
             order_id=m.order_id,
             reason_text=m.reason_text,
             reason_data=json.loads(m.reason_data) if m.reason_data else {},
+            signal_ids=json.loads(m.signal_ids) if m.signal_ids else [],
             created_at=self._str_to_dt(m.created_at),
         )
 

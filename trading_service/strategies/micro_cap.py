@@ -4,9 +4,9 @@ from typing import Any
 from dataclasses import dataclass
 
 from trading_service.exchange import MockExchange
-from trading_service.pickers import ISymbolPicker, SymbolInfo
+from trading_service.pickers import ISymbolPicker
 from trading_service.strategies.base import Strategy, StrategyAction, StrategyConfig
-from trading_service.types import CrossSignalType, TradeDirection
+from trading_service.types import TradeDirection
 
 
 @dataclass
@@ -41,9 +41,9 @@ class MicroCapStrategy(Strategy):
         self.config: MicroCapConfig = config
 
     async def execute(self, execution_id: str = "") -> list[StrategyAction]:
-        """执行策略 - 仅入场逻辑。
+        """执行策略 - 基于信号驱动入场。
 
-        优先级：止盈/止损留待下一轮实现，本轮只做开新仓。
+        从数据库拉取金叉信号，排除已持仓 symbol 后开仓。
         返回执行的动作列表。
         """
         actions: list[StrategyAction] = []
@@ -53,59 +53,52 @@ class MicroCapStrategy(Strategy):
         if current_count >= self.config.max_positions:
             return actions
 
-        actions.extend(await self._open_new_positions(current_count, execution_id))
+        actions.extend(await self._open_from_signals(current_count, execution_id))
         return actions
 
-    async def _open_new_positions(self, current_count: int, execution_id: str = "") -> list[StrategyAction]:
-        """筛选买入信号并开新仓。"""
+    async def _open_from_signals(self, current_count: int, execution_id: str = "") -> list[StrategyAction]:
+        """从数据库拉取金叉信号，开新仓。"""
         actions: list[StrategyAction] = []
-        candidates = await self.symbol_picker.pick()
+        # 拉取最近的金叉信号
+        signals = self.get_recent_signals(signal_type="golden_cross", limit=20)
 
         occupied = {
             p.symbol for p in self.exchange.get_positions(tag="micro_cap", status="open")
         }
-        # 候选 -> 买入信号过滤 -> 排除已持仓
-        signals = [
-            info for info in candidates
-            if info.symbol not in occupied and self._is_buy_signal(info)
-        ]
+        # 排除已有持仓的 symbol
+        candidate_signals = [s for s in signals if s.symbol not in occupied]
 
-        if not signals:
+        if not candidate_signals:
             return actions
 
         slots = self.config.max_positions - current_count
-        prices = await self.exchange.fetch_prices([s.symbol for s in signals])
+        prices = await self.exchange.fetch_prices([s.symbol for s in candidate_signals[:slots]])
 
-        for info in signals[:slots]:
-            price = prices.get(info.symbol, 0.0)
+        for signal in candidate_signals[:slots]:
+            price = prices.get(signal.symbol, 0.0)
             if price > 0:
-                is_breakout = info.cross_signal == CrossSignalType.GOLDEN
-                action_tag = "entry_breakout" if is_breakout else "entry_sideways"
                 self.exchange.open_position(
-                    symbol=info.symbol,
+                    symbol=signal.symbol,
                     direction=TradeDirection.LONG,
                     size=self.config.position_size_usdt,
                     price=price,
                     tag="micro_cap",
-                    reason_text=f"开仓 @ {price}",
+                    reason_text=f"金叉信号开仓 @ {price}",
                     reason_data={
-                        "action": action_tag,
-                        "cross_signal": info.cross_signal.value if info.cross_signal else None,
+                        "action": "entry_breakout",
+                        "signal_type": signal.signal_type,
                         "price": price,
                         "size": self.config.position_size_usdt,
                     },
+                    signal_ids=[signal.id],
                     execution_id=execution_id,
                 )
                 actions.append(StrategyAction(
                     type="open",
-                    symbol=info.symbol,
-                    reason=f"开仓 @ {price}",
+                    symbol=signal.symbol,
+                    reason=f"金叉信号开仓 @ {price}",
                 ))
         return actions
-
-    def _is_buy_signal(self, info: SymbolInfo) -> bool:
-        """判定是否为买入信号：横盘或近期金叉突破。"""
-        return info.is_sideways_bottom or info.cross_signal == CrossSignalType.GOLDEN
 
     def get_status(self) -> dict[str, Any]:
         """获取策略状态。"""

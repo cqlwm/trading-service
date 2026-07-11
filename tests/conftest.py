@@ -190,6 +190,7 @@ class InMemoryTradingRepository(TradingRepository):
     def list_signals(
         self,
         symbol: str | None = None,
+        signal_type: str | None = None,
         severity_min: int | None = None,
         limit: int = 50,
         offset: int = 0,
@@ -197,6 +198,8 @@ class InMemoryTradingRepository(TradingRepository):
         results = list(self.signals.values())
         if symbol:
             results = [r for r in results if r.symbol == symbol]
+        if signal_type:
+            results = [r for r in results if r.signal_type == signal_type]
         if severity_min:
             results = [r for r in results if r.severity >= severity_min]
         return results[offset:offset + limit]
@@ -204,21 +207,25 @@ class InMemoryTradingRepository(TradingRepository):
     def get_signals_filtered(
         self,
         symbol: str | None = None,
+        signal_type: str | None = None,
         severity_min: int | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[SignalRecord]:
-        results = self.list_signals(symbol=symbol, severity_min=severity_min, limit=limit + offset)
+        results = self.list_signals(symbol=symbol, signal_type=signal_type, severity_min=severity_min, limit=limit + offset)
         return results[offset:offset + limit]
 
     def count_signals(
         self,
         symbol: str | None = None,
+        signal_type: str | None = None,
         severity_min: int | None = None,
     ) -> int:
         results = list(self.signals.values())
         if symbol:
             results = [r for r in results if r.symbol == symbol]
+        if signal_type:
+            results = [r for r in results if r.signal_type == signal_type]
         if severity_min:
             results = [r for r in results if r.severity >= severity_min]
         return len(results)

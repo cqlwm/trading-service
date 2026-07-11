@@ -94,6 +94,7 @@ class StrategyActionRecord:
     order_id: str = ""
     reason_text: str = ""
     reason_data: dict[str, object] = field(default_factory=dict)
+    signal_ids: list[str] = field(default_factory=list)  # 基于哪些信号（可多个）
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -178,6 +179,7 @@ class TradingRepository(ABC):
     def list_signals(
         self,
         symbol: str | None = None,
+        signal_type: str | None = None,
         severity_min: int | None = None,
         limit: int = 50,
         offset: int = 0,
@@ -187,17 +189,19 @@ class TradingRepository(ABC):
     def get_signals_filtered(
         self,
         symbol: str | None = None,
+        signal_type: str | None = None,
         severity_min: int | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[SignalRecord]:
         """列出信号（别名，向后兼容）"""
-        return self.list_signals(symbol, severity_min, limit, offset)
+        return self.list_signals(symbol, signal_type, severity_min, limit, offset)
 
     @abstractmethod
     def count_signals(
         self,
         symbol: str | None = None,
+        signal_type: str | None = None,
         severity_min: int | None = None,
     ) -> int:
         """统计信号总数。"""

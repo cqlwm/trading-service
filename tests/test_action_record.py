@@ -177,3 +177,45 @@ class TestActionRecordManual:
         close_actions = [a for a in actions if a.action_type == "close"]
         assert len(close_actions) == 1
         assert close_actions[0].execution_id == ""
+
+
+class TestActionRecordSignalIds:
+    """测试动作记录的 signal_ids 字段。"""
+
+    def test_open_with_signal_ids(self, exchange: MockExchange) -> None:
+        """开仓时传入 signal_ids，动作记录应保存。"""
+        position = exchange.open_position(
+            symbol="BTCUSDT", direction=TradeDirection.LONG,
+            size=100, price=50000, tag="micro_cap", reason_text="金叉开仓",
+            signal_ids=["sig_001", "sig_002"],
+        )
+
+        actions = exchange.db.list_actions_by_position(position.id)
+        assert len(actions) == 1
+        assert actions[0].signal_ids == ["sig_001", "sig_002"]
+
+    def test_open_without_signal_ids_defaults_empty(self, exchange: MockExchange) -> None:
+        """不传 signal_ids 时，默认为空列表。"""
+        position = exchange.open_position(
+            symbol="BTCUSDT", direction=TradeDirection.LONG,
+            size=100, price=50000, tag="martingale", reason_text="开仓",
+        )
+
+        actions = exchange.db.list_actions_by_position(position.id)
+        assert len(actions) == 1
+        assert actions[0].signal_ids == []
+
+    def test_multiple_signals_one_action(self, exchange: MockExchange) -> None:
+        """一个动作基于多个信号时，signal_ids 应包含所有信号 ID。"""
+        position = exchange.open_position(
+            symbol="BTCUSDT", direction=TradeDirection.LONG,
+            size=100, price=50000, tag="micro_cap", reason_text="多信号开仓",
+            signal_ids=["sig_golden", "sig_volume", "sig_momentum"],
+        )
+
+        actions = exchange.db.list_actions_by_position(position.id)
+        assert len(actions) == 1
+        assert len(actions[0].signal_ids) == 3
+        assert "sig_golden" in actions[0].signal_ids
+        assert "sig_volume" in actions[0].signal_ids
+        assert "sig_momentum" in actions[0].signal_ids
