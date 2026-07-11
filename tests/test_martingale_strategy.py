@@ -48,11 +48,11 @@ class TestMartingaleExecute:
         # ARRANGE - 先开 2 个仓位
         exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason="existing",
+            size=100, price=50000, tag="martingale", reason_text="existing",
         )
         exchange.open_position(
             symbol="ETHUSDT", direction=TradeDirection.LONG,
-            size=100, price=3000, tag="martingale", reason="existing",
+            size=100, price=3000, tag="martingale", reason_text="existing",
         )
 
         config = MartingaleConfig(max_positions=2, base_order_size=100.0)
@@ -73,7 +73,7 @@ class TestMartingaleExecute:
         # ARRANGE - BTCUSDT 已有持仓
         exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason="existing",
+            size=100, price=50000, tag="martingale", reason_text="existing",
         )
 
         config = MartingaleConfig(max_positions=5, base_order_size=100.0)
@@ -100,7 +100,7 @@ class TestMartingaleAddPosition:
         # ARRANGE - 开初始仓位，价格 50000
         exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason="initial",
+            size=100, price=50000, tag="martingale", reason_text="initial",
         )
 
         config = MartingaleConfig(
@@ -131,7 +131,7 @@ class TestMartingaleAddPosition:
         # ARRANGE - 已有 3 个加仓订单
         position = exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason="initial",
+            size=100, price=50000, tag="martingale", reason_text="initial",
         )
         # 手动添加 3 个加仓订单
         for i in range(3):
@@ -145,7 +145,6 @@ class TestMartingaleAddPosition:
                 size=200 * (2 ** i),
                 price=50000 * (1 - 0.015 * (i + 1)),
                 order_type=OrderType.ADD.value,
-                reason=f"safety_order_{i + 1}",
             ))
 
         config = MartingaleConfig(max_positions=1, safety_order_count=3)
@@ -171,7 +170,7 @@ class TestMartingaleTakeProfit:
         # ARRANGE - 开仓价格 50000
         exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason="initial",
+            size=100, price=50000, tag="martingale", reason_text="initial",
         )
 
         config = MartingaleConfig(
@@ -199,7 +198,7 @@ class TestMartingaleTakeProfit:
         """价格未达到止盈目标时，不应平仓。"""
         exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason="initial",
+            size=100, price=50000, tag="martingale", reason_text="initial",
         )
 
         config = MartingaleConfig(max_positions=1, take_profit_pct=2.0)
@@ -222,11 +221,11 @@ class TestMartingaleTakeProfit:
         # ARRANGE - 初始开仓 + 加仓
         position = exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason="initial",
+            size=100, price=50000, tag="martingale", reason_text="initial",
         )
         # 加仓后加权均价 = 49333.33
         exchange.add_position(
-            position_id=position.id, size=200, price=49000, reason="safety_order_1",
+            position_id=position.id, size=200, price=49000, reason_text="safety_order_1",
         )
 
         config = MartingaleConfig(max_positions=1, take_profit_pct=1.5)
@@ -254,7 +253,7 @@ class TestMartingaleStopLoss:
         # ARRANGE - 开仓价格 50000
         exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason="initial",
+            size=100, price=50000, tag="martingale", reason_text="initial",
         )
 
         config = MartingaleConfig(
@@ -281,7 +280,7 @@ class TestMartingaleStopLoss:
         """价格未达到止损线时，不应平仓。"""
         exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason="initial",
+            size=100, price=50000, tag="martingale", reason_text="initial",
         )
 
         config = MartingaleConfig(max_positions=1, stop_loss_pct=5.0)
@@ -304,7 +303,7 @@ class TestMartingaleStopLoss:
         # ARRANGE
         exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason="initial",
+            size=100, price=50000, tag="martingale", reason_text="initial",
         )
 
         config = MartingaleConfig(
@@ -337,11 +336,11 @@ class TestMartingaleStopLoss:
         # ARRANGE - 初始开仓 + 一次加仓
         position = exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason="initial",
+            size=100, price=50000, tag="martingale", reason_text="initial",
         )
         # 加仓后加权均价 = 49333.33
         exchange.add_position(
-            position_id=position.id, size=200, price=49000, reason="safety_order_1",
+            position_id=position.id, size=200, price=49000, reason_text="safety_order_1",
         )
 
         config = MartingaleConfig(max_positions=1, stop_loss_pct=3.0)

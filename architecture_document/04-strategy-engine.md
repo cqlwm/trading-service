@@ -395,7 +395,8 @@ graph TD
 3. **过滤**：排除已持仓 symbol；只保留 `_is_buy_signal` 通过的
 4. **开仓**：按 `max_positions - current_count` 配额，对候选开多仓
    - `size = position_size_usdt`（10 USDT）
-   - `reason` 区分 `micro_cap_entry_sideways` / `micro_cap_entry_breakout`
+   - `reason_text` 为自然语言描述（如"开仓 @ {price}"），`reason_data` 为结构化决策数据（含 `action`、`cross_signal`、`price`、`size`）
+   - 决策上下文写入 `trading_strategy_actions` 表，通过 `order_id` 关联订单
 
 > 止盈/止损、调仓换仓留待后续迭代。
 
@@ -551,5 +552,9 @@ API 提供手动平仓接口，策略执行也可触发强制平仓：
 ```python
 # 策略内强制止损
 if position.pnl_pct(current_price) < -20.0:  # 亏损超 20%
-    self.exchange.close_position(position.id, reason="stop_loss")
+    self.exchange.close_position(
+        position.id,
+        reason_text=f"止损平仓 @ {current_price}",
+        reason_data={"action": "stop_loss", "price": current_price, "loss_pct": 20.0},
+    )
 ```

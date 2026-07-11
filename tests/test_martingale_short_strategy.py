@@ -66,7 +66,7 @@ class TestMartingaleShortExecute:
             size=100.0,
             price=50000.0,
             tag="martingale_short",
-            reason="initial",
+            reason_text="initial",
         )
 
         # 价格上涨 3%（超过第1次加仓阈值 1.5%）
@@ -99,7 +99,7 @@ class TestMartingaleShortExecute:
             size=100.0,
             price=50000.0,
             tag="martingale_short",
-            reason="initial",
+            reason_text="initial",
         )
 
         # 价格下跌 5%（盈利方向）
@@ -130,7 +130,7 @@ class TestMartingaleShortExecute:
             size=100.0,
             price=50000.0,
             tag="martingale_short",
-            reason="initial",
+            reason_text="initial",
         )
 
         # 价格下跌 2.5%（达到止盈 2%）
@@ -162,7 +162,7 @@ class TestMartingaleShortExecute:
             size=100.0,
             price=50000.0,
             tag="martingale_short",
-            reason="initial",
+            reason_text="initial",
         )
 
         # 价格上涨 12%（超过止损 10%）
@@ -183,7 +183,7 @@ class TestMartingaleShortExecute:
             size=100.0,
             price=50000.0,
             tag="martingale",
-            reason="long_entry",
+            reason_text="long_entry",
         )
 
         short_config = MartingaleConfig(

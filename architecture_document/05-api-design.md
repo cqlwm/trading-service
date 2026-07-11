@@ -118,7 +118,6 @@ POST   /api/positions/a1b2c3/close  # 平仓动作
             "order_type": "OPEN",
             "size": 0.001,
             "price": 41000.0,
-            "reason": "initial_entry",
             "direction": "long",
             "created_at": "2024-01-15T10:30:00Z"
         },
@@ -127,7 +126,6 @@ POST   /api/positions/a1b2c3/close  # 平仓动作
             "order_type": "ADD",
             "size": 0.0005,
             "price": 40000.0,
-            "reason": "martingale_layer_1",
             "direction": "long",
             "created_at": "2024-01-15T11:00:00Z"
         }
@@ -144,20 +142,14 @@ POST   /api/positions/a1b2c3/close  # 平仓动作
 
 ### 3.4 POST /api/positions/{id}/close
 
-**请求体**:
-```json
-{
-    "reason": "manual"  // 可选，默认 "manual"
-}
-```
+**请求体**: 无（手动平仓使用默认 reason_text="手动平仓"）
 
 **成功响应 (200)**:
 ```json
 {
     "position_id": "a1b2c3d4e5f6",
     "close_price": 42000.5,
-    "pnl_pct": 0.0,
-    "reason": "manual"
+    "pnl_pct": 0.0
 }
 ```
 
@@ -193,7 +185,6 @@ POST   /api/positions/a1b2c3/close  # 平仓动作
             "direction": "long",
             "size": 0.001,
             "price": 41000.0,
-            "reason": "initial_entry",
             "order_type": "OPEN",
             "created_at": "2024-01-15T10:30:00Z"
         }

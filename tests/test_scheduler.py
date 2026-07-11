@@ -9,6 +9,7 @@ from trading_service.scheduler import StrategyScheduler
 from trading_service.strategies.base import Strategy, StrategyAction, StrategyConfig
 from trading_service.pickers import ISymbolPicker
 from trading_service.exchange import MockExchange
+from trading_service.types import TradeDirection
 
 
 class FakePicker(ISymbolPicker):
@@ -28,11 +29,21 @@ class FakeStrategy(Strategy):
         self._should_fail = should_fail
         self.execute_count = 0
 
-    async def execute(self) -> list[StrategyAction]:
+    async def execute(self, execution_id: str = "") -> list[StrategyAction]:
         self.execute_count += 1
         if self._should_fail:
             raise RuntimeError("测试故意失败")
-        return [StrategyAction(type="open", symbol="BTCUSDT", detail="测试开仓")]
+        # 通过 exchange 实际开仓，产生动作记录
+        self.exchange.open_position(
+            symbol="BTCUSDT",
+            direction=TradeDirection.LONG,
+            size=100.0,
+            price=50000.0,
+            tag="fake",
+            reason_text="测试开仓",
+            execution_id=execution_id,
+        )
+        return [StrategyAction(type="open", symbol="BTCUSDT", reason="测试开仓")]
 
     def get_status(self) -> dict[str, Any]:
         return {"strategy": "fake", "execute_count": self.execute_count}
@@ -47,7 +58,7 @@ class FailingStrategy(Strategy):
     def __init__(self, exchange: MockExchange) -> None:
         super().__init__(exchange, StrategyConfig(), FakePicker())
 
-    async def execute(self) -> list[StrategyAction]:
+    async def execute(self, execution_id: str = "") -> list[StrategyAction]:
         raise RuntimeError("策略执行故意失败")
 
     def get_status(self) -> dict[str, Any]:
@@ -181,10 +192,27 @@ class TestSchedulerExecutionRecord:
             record = executions[0]
             assert record.success is True
             assert record.action_count == 1
-            assert len(record.actions_json) == 1
-            assert record.actions_json[0]["symbol"] == "BTCUSDT"
             assert record.finished_at is not None
             assert record.error is None
+        finally:
+            await scheduler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execution_id_links_to_action_records(self, scheduler: StrategyScheduler) -> None:
+        """执行记录的 id 应该与动作记录的 execution_id 关联。"""
+        await scheduler.start()
+        try:
+            await scheduler._execute_strategy("fake")
+
+            executions = scheduler.list_executions("fake")
+            assert len(executions) == 1
+            execution_id = executions[0].id
+
+            actions = scheduler.list_actions_by_execution(execution_id)
+            assert len(actions) == 1, "应有 1 条动作记录"
+            assert actions[0].execution_id == execution_id
+            assert actions[0].symbol == "BTCUSDT"
+            assert actions[0].action_type == "open"
         finally:
             await scheduler.shutdown()
 

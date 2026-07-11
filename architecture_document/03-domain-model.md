@@ -31,7 +31,6 @@ classDiagram
         +TradeDirection direction
         +float size
         +float price
-        +str reason
         +OrderType order_type
         +datetime created_at
     }
@@ -224,7 +223,6 @@ CREATE TABLE trading_orders (
     direction VARCHAR(10) NOT NULL,
     size FLOAT NOT NULL,
     price FLOAT NOT NULL,
-    reason VARCHAR(100) NOT NULL,
     order_type VARCHAR(20) NOT NULL,
     created_at DATETIME NOT NULL,
     FOREIGN KEY (position_id) REFERENCES trading_positions(id)
@@ -246,8 +244,9 @@ CREATE INDEX idx_orders_created ON trading_orders(created_at DESC);
 | `direction` | VARCHAR(10) | 方向 | `"long"` |
 | `size` | FLOAT | 本次订单数量 | `0.0005` |
 | `price` | FLOAT | 成交价格 | `42100.0` |
-| `reason` | VARCHAR(100) | 下单原因 | `"martingale_layer_2"` |
 | `order_type` | VARCHAR(20) | 订单类型 | `"ADD"` |
+
+> **注意**：Order 表不再包含 `reason` 字段。下单原因（决策上下文）已移至 `trading_strategy_actions` 表，通过 `order_id` 关联。详见 3.5 节。
 
 ### 3.3 trading_signals (信号表)
 
@@ -309,8 +308,20 @@ erDiagram
         varchar direction "方向"
         float size "数量"
         float price "价格"
-        varchar reason "原因"
         varchar order_type "OPEN/ADD/REDUCE/CLOSE"
+        datetime created_at "创建时间"
+    }
+    
+    trading_strategy_actions {
+        varchar id PK "动作记录ID"
+        varchar execution_id "轮次ID(可空)"
+        varchar strategy_name "策略名(=tag)"
+        varchar action_type "open/add/close/skip"
+        varchar symbol "交易对"
+        varchar position_id "仓位ID(可空)"
+        varchar order_id "订单ID(可空)"
+        text reason_text "自然语言决策描述"
+        text reason_data "结构化决策数据JSON"
         datetime created_at "创建时间"
     }
     
@@ -326,6 +337,8 @@ erDiagram
     }
     
     trading_positions ||--o{ trading_orders : "包含多个订单"
+    trading_positions ||--o{ trading_strategy_actions : "仓位的动作记录"
+    trading_orders ||--o{ trading_strategy_actions : "订单的决策记录"
 ```
 
 ---

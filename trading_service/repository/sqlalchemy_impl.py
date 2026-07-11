@@ -12,6 +12,7 @@ from trading_service.repository.abc import (
     OrderRecord,
     PositionRecord,
     SignalRecord,
+    StrategyActionRecord,
     StrategyExecutionRecord,
     StrategyScheduleRecord,
     TradingRepository,
@@ -20,6 +21,7 @@ from trading_service.repository.models import (
     OrderModel,
     PositionModel,
     SignalModel,
+    StrategyActionModel,
     StrategyExecutionModel,
     StrategyScheduleModel,
 )
@@ -150,7 +152,6 @@ class SqlalchemyTradingStore(TradingRepository):
                 existing.direction = order.direction
                 existing.size = order.size
                 existing.price = order.price
-                existing.reason = order.reason
                 existing.order_type = order.order_type
                 existing.created_at = self._dt_to_str(order.created_at)
             else:
@@ -161,7 +162,6 @@ class SqlalchemyTradingStore(TradingRepository):
                     direction=order.direction,
                     size=order.size,
                     price=order.price,
-                    reason=order.reason,
                     order_type=order.order_type,
                     created_at=self._dt_to_str(order.created_at),
                 )
@@ -182,7 +182,6 @@ class SqlalchemyTradingStore(TradingRepository):
                     direction=m.direction,
                     size=m.size,
                     price=m.price,
-                    reason=m.reason,
                     order_type=m.order_type,
                     created_at=self._str_to_dt(m.created_at),
                 )
@@ -215,7 +214,6 @@ class SqlalchemyTradingStore(TradingRepository):
                     direction=m.direction,
                     size=m.size,
                     price=m.price,
-                    reason=m.reason,
                     order_type=m.order_type,
                     created_at=self._str_to_dt(m.created_at),
                 )
@@ -364,7 +362,6 @@ class SqlalchemyTradingStore(TradingRepository):
                 finished_at=self._dt_to_str(execution.finished_at) if execution.finished_at else None,
                 success=execution.success,
                 action_count=execution.action_count,
-                actions_json=json.dumps(execution.actions_json),
                 error=execution.error,
             )
             session.add(model)
@@ -394,11 +391,75 @@ class SqlalchemyTradingStore(TradingRepository):
                     finished_at=self._str_to_dt(m.finished_at) if m.finished_at else None,
                     success=m.success,
                     action_count=m.action_count,
-                    actions_json=json.loads(m.actions_json) if m.actions_json else [],
                     error=m.error,
                 )
                 for m in models
             ]
+
+    def save_action(self, action: StrategyActionRecord) -> None:
+        with Session(self.engine) as session:
+            model = StrategyActionModel(
+                id=action.id,
+                execution_id=action.execution_id,
+                strategy_name=action.strategy_name,
+                action_type=action.action_type,
+                symbol=action.symbol,
+                position_id=action.position_id,
+                order_id=action.order_id,
+                reason_text=action.reason_text,
+                reason_data=json.dumps(action.reason_data),
+                created_at=self._dt_to_str(action.created_at),
+            )
+            session.add(model)
+            session.commit()
+
+    def _action_model_to_record(self, m: StrategyActionModel) -> StrategyActionRecord:
+        return StrategyActionRecord(
+            id=m.id,
+            execution_id=m.execution_id,
+            strategy_name=m.strategy_name,
+            action_type=m.action_type,
+            symbol=m.symbol,
+            position_id=m.position_id,
+            order_id=m.order_id,
+            reason_text=m.reason_text,
+            reason_data=json.loads(m.reason_data) if m.reason_data else {},
+            created_at=self._str_to_dt(m.created_at),
+        )
+
+    def list_actions_by_execution(self, execution_id: str) -> list[StrategyActionRecord]:
+        with Session(self.engine) as session:
+            query = (
+                select(StrategyActionModel)
+                .where(StrategyActionModel.execution_id == execution_id)
+                .order_by(StrategyActionModel.created_at)
+            )
+            result = session.execute(query)
+            models = result.scalars().all()
+            return [self._action_model_to_record(m) for m in models]
+
+    def list_actions_by_position(self, position_id: str) -> list[StrategyActionRecord]:
+        with Session(self.engine) as session:
+            query = (
+                select(StrategyActionModel)
+                .where(StrategyActionModel.position_id == position_id)
+                .order_by(StrategyActionModel.created_at)
+            )
+            result = session.execute(query)
+            models = result.scalars().all()
+            return [self._action_model_to_record(m) for m in models]
+
+    def list_actions_by_symbol(self, symbol: str, limit: int = 50) -> list[StrategyActionRecord]:
+        with Session(self.engine) as session:
+            query = (
+                select(StrategyActionModel)
+                .where(StrategyActionModel.symbol == symbol)
+                .order_by(StrategyActionModel.created_at)
+                .limit(limit)
+            )
+            result = session.execute(query)
+            models = result.scalars().all()
+            return [self._action_model_to_record(m) for m in models]
 
     def begin(self) -> None:
         """开始事务（SQLAlchemy 是隐式的，这里占位）。"""

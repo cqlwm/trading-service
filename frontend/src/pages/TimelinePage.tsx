@@ -76,9 +76,6 @@ function OrderContent({ data }: { data: TimelineOrderData }) {
           {formatSize(data.size)} @ {formatPrice(data.price)}
         </span>
       </div>
-      {data.reason && (
-        <p className="mt-1 text-xs text-muted-foreground">{data.reason}</p>
-      )}
     </div>
   )
 }
@@ -100,9 +97,6 @@ function CloseContent({ data }: { data: TimelineCloseData }) {
           {data.pnl_pct}%
         </span>
       </div>
-      {data.reason && (
-        <p className="mt-1 text-xs text-muted-foreground">{data.reason}</p>
-      )}
     </div>
   )
 }

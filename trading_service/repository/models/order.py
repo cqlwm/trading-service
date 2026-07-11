@@ -19,6 +19,5 @@ class OrderModel(Base):
     direction: Mapped[str] = mapped_column(String(16), nullable=False)
     size: Mapped[float] = mapped_column(Float, nullable=False)
     price: Mapped[float] = mapped_column(Float, nullable=False)
-    reason: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     order_type: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)

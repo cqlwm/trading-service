@@ -35,7 +35,6 @@ async def list_orders(
             "direction": o.direction.value,
             "size": o.size,
             "price": o.price,
-            "reason": o.reason,
             "order_type": o.order_type.value,
             "created_at": o.created_at.isoformat(),
         }

@@ -1,6 +1,6 @@
-"""测试 MockExchange.open_position 方法。
+"""测试 MockExchange.open_position / add_position / close_position 方法。
 
-TDD 第一步：先写测试，再实现功能
+验证核心操作和动作记录（StrategyActionRecord）的写入。
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class TestOpenPosition:
             size=100.0,
             price=50000.0,
             tag="martingale",
-            reason="strategy_signal",
+            reason_text="策略信号开仓",
         )
 
         assert position is not None
@@ -40,7 +40,7 @@ class TestOpenPosition:
             size=100.0,
             price=50000.0,
             tag="martingale",
-            reason="strategy_signal",
+            reason_text="策略信号开仓",
         )
 
         orders = exchange.db.get_orders_by_position(position.id)
@@ -50,7 +50,32 @@ class TestOpenPosition:
         assert order.symbol == "BTCUSDT"
         assert order.size == 100.0
         assert order.price == 50000.0
-        assert order.reason == "strategy_signal"
+
+    def test_open_position_writes_action_record(self, exchange: MockExchange) -> None:
+        """开仓应该写入一条动作记录，包含决策上下文。"""
+        position = exchange.open_position(
+            symbol="BTCUSDT",
+            direction=TradeDirection.LONG,
+            size=100.0,
+            price=50000.0,
+            tag="martingale",
+            reason_text="金叉信号开仓",
+            reason_data={"action": "initial_entry", "rsi": 35, "cross": "golden"},
+            execution_id="exec_001",
+        )
+
+        actions = exchange.db.list_actions_by_position(position.id)
+        assert len(actions) == 1, f"应有 1 条动作记录，但有 {len(actions)} 条"
+        action = actions[0]
+        assert action.action_type == "open"
+        assert action.symbol == "BTCUSDT"
+        assert action.position_id == position.id
+        assert action.strategy_name == "martingale"
+        assert action.execution_id == "exec_001"
+        assert action.reason_text == "金叉信号开仓"
+        assert action.reason_data["action"] == "initial_entry"
+        assert action.reason_data["rsi"] == 35
+        assert action.order_id != "", "应关联到订单 ID"
 
     def test_open_position_has_correct_tag_isolation(self, exchange: MockExchange) -> None:
         """开仓后，用 tag 应该能查询到对应持仓。"""
@@ -60,7 +85,7 @@ class TestOpenPosition:
             size=100,
             price=50000,
             tag="martingale",
-            reason="test",
+            reason_text="test",
         )
         exchange.open_position(
             symbol="ETHUSDT",
@@ -68,7 +93,7 @@ class TestOpenPosition:
             size=50,
             price=3000,
             tag="micro_cap",
-            reason="test",
+            reason_text="test",
         )
 
         martingale_positions = exchange.get_positions(tag="martingale")
@@ -100,7 +125,7 @@ class TestTransactionAtomicity:
                 size=100,
                 price=50000,
                 tag="test",
-                reason="test",
+                reason_text="test",
             )
         except RuntimeError:
             pass
@@ -120,14 +145,14 @@ class TestAddPosition:
             size=100.0,
             price=50000.0,
             tag="martingale",
-            reason="initial",
+            reason_text="initial",
         )
 
         updated_position = exchange.add_position(
             position_id=position.id,
             size=200.0,
             price=49000.0,
-            reason="safety_order_1",
+            reason_text="第 1 次加仓",
         )
 
         assert updated_position.total_size == 300.0
@@ -137,20 +162,27 @@ class TestAddPosition:
         """加仓应该创建 ADD 类型的订单。"""
         position = exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason="initial",
+            size=100, price=50000, tag="martingale", reason_text="initial",
         )
 
         exchange.add_position(
             position_id=position.id,
             size=200,
             price=49000,
-            reason="safety_order_1",
+            reason_text="第 1 次加仓",
+            reason_data={"action": "safety_order", "layer": 1},
         )
 
         orders = exchange.db.get_orders_by_position(position.id)
         add_orders = [o for o in orders if o.order_type == OrderType.ADD.value]
         assert len(add_orders) == 1
-        assert add_orders[0].reason == "safety_order_1"
+
+        # 验证动作记录
+        actions = exchange.db.list_actions_by_position(position.id)
+        add_actions = [a for a in actions if a.action_type == "add"]
+        assert len(add_actions) == 1
+        assert add_actions[0].reason_text == "第 1 次加仓"
+        assert add_actions[0].reason_data["layer"] == 1
 
 
 class TestClosePosition:
@@ -160,13 +192,13 @@ class TestClosePosition:
         """平仓应该将持仓状态改为 closed。"""
         position = exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason="initial",
+            size=100, price=50000, tag="martingale", reason_text="initial",
         )
 
         result = exchange.close_position(
             position_id=position.id,
             price=50750.0,
-            reason="take_profit",
+            reason_text="止盈平仓",
         )
 
         assert result is not None
@@ -179,32 +211,56 @@ class TestClosePosition:
         """平仓应该创建 CLOSE 类型的订单。"""
         position = exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason="initial",
+            size=100, price=50000, tag="martingale", reason_text="initial",
         )
 
         exchange.close_position(
             position_id=position.id,
             price=50750.0,
-            reason="take_profit",
+            reason_text="止盈平仓",
+            reason_data={"action": "take_profit", "profit_pct": 1.5},
         )
 
         orders = exchange.db.get_orders_by_position(position.id)
         close_orders = [o for o in orders if o.order_type == OrderType.CLOSE.value]
         assert len(close_orders) == 1
-        assert close_orders[0].reason == "take_profit"
+
+        # 验证动作记录
+        actions = exchange.db.list_actions_by_position(position.id)
+        close_actions = [a for a in actions if a.action_type == "close"]
+        assert len(close_actions) == 1
+        assert close_actions[0].reason_text == "止盈平仓"
+        assert close_actions[0].reason_data["action"] == "take_profit"
 
     def test_close_position_returns_pnl(self, exchange: MockExchange) -> None:
         """平仓结果应该包含盈亏信息。"""
         position = exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason="initial",
+            size=100, price=50000, tag="martingale", reason_text="initial",
         )
 
         result = exchange.close_position(
             position_id=position.id,
             price=51000.0,
-            reason="take_profit",
+            reason_text="止盈平仓",
         )
 
         assert result is not None
         assert abs(result.pnl_pct - 2.0) < 0.01
+
+    def test_manual_close_has_empty_execution_id(self, exchange: MockExchange) -> None:
+        """手动平仓的动作记录 execution_id 应为空。"""
+        position = exchange.open_position(
+            symbol="BTCUSDT", direction=TradeDirection.LONG,
+            size=100, price=50000, tag="martingale", reason_text="initial",
+        )
+
+        exchange.close_position(
+            position_id=position.id,
+            price=51000.0,
+        )  # 不传 execution_id，使用默认值
+
+        actions = exchange.db.list_actions_by_position(position.id)
+        close_actions = [a for a in actions if a.action_type == "close"]
+        assert len(close_actions) == 1
+        assert close_actions[0].execution_id == "", "手动平仓 execution_id 应为空"

@@ -35,7 +35,6 @@ class OrderRecord:
     price: float
     order_type: str
     position_id: str = ""
-    reason: str = ""
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -66,7 +65,7 @@ class StrategyScheduleRecord:
 
 @dataclass
 class StrategyExecutionRecord:
-    """策略执行历史记录。"""
+    """策略执行历史记录（轮次级 -- 过程层）。"""
 
     id: str
     strategy_name: str
@@ -74,8 +73,28 @@ class StrategyExecutionRecord:
     finished_at: datetime | None = None
     success: bool = False
     action_count: int = 0
-    actions_json: list[dict[str, str]] = field(default_factory=list)
     error: str | None = None
+
+
+@dataclass
+class StrategyActionRecord:
+    """策略动作记录（动作级 -- 决策层），记录每个操作的决策上下文。
+
+    通过 position_id / order_id 与仓位、订单关联，
+    通过 execution_id 与轮次记录关联。
+    strategy_name 等于 position.tag，用于策略隔离。
+    """
+
+    id: str
+    execution_id: str = ""
+    strategy_name: str = ""
+    action_type: str = ""  # "open" | "add" | "close" | "skip"
+    symbol: str = ""
+    position_id: str = ""
+    order_id: str = ""
+    reason_text: str = ""
+    reason_data: dict[str, object] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class TradingRepository(ABC):
@@ -209,6 +228,22 @@ class TradingRepository(ABC):
         offset: int = 0,
     ) -> list[StrategyExecutionRecord]:
         """列出策略执行历史（按时间倒序）。"""
+
+    @abstractmethod
+    def save_action(self, action: StrategyActionRecord) -> None:
+        """保存策略动作记录。"""
+
+    @abstractmethod
+    def list_actions_by_execution(self, execution_id: str) -> list[StrategyActionRecord]:
+        """列出某次执行的所有动作记录。"""
+
+    @abstractmethod
+    def list_actions_by_position(self, position_id: str) -> list[StrategyActionRecord]:
+        """列出某个仓位的所有动作记录（交易故事线，按时间正序）。"""
+
+    @abstractmethod
+    def list_actions_by_symbol(self, symbol: str, limit: int = 50) -> list[StrategyActionRecord]:
+        """列出某个币种的所有动作记录（币种故事线，按时间正序）。"""
 
     def transaction(self) -> "TransactionContext":
         """事务上下文管理器。

@@ -107,7 +107,6 @@ async def get_position_actions(
             "order_type": o.order_type.value,
             "size": o.size,
             "price": o.price,
-            "reason": o.reason,
             "direction": o.direction.value,
             "created_at": o.created_at.isoformat(),
         }
@@ -130,5 +129,4 @@ async def close_position(
         "position_id": result.position_id,
         "close_price": result.close_price,
         "pnl_pct": round(result.pnl_pct, 2),
-        "reason": result.reason,
     }

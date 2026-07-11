@@ -14,7 +14,7 @@ class StrategyAction:
 
     type: str  # "open" | "add" | "close" | "skip"
     symbol: str
-    detail: str = ""
+    reason: str = ""
 
 
 @dataclass
@@ -42,8 +42,11 @@ class Strategy(ABC):
         self.symbol_picker = symbol_picker
 
     @abstractmethod
-    async def execute(self) -> list[StrategyAction]:
-        """执行策略，返回执行的动作列表。"""
+    async def execute(self, execution_id: str = "") -> list[StrategyAction]:
+        """执行策略，返回执行的动作列表。
+
+        execution_id 用于将动作记录关联到调度轮次（手动操作为空）。
+        """
 
     @abstractmethod
     def get_status(self) -> dict[str, Any]:

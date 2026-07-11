@@ -40,7 +40,7 @@ class MicroCapStrategy(Strategy):
         super().__init__(exchange, config, symbol_picker)
         self.config: MicroCapConfig = config
 
-    async def execute(self) -> list[StrategyAction]:
+    async def execute(self, execution_id: str = "") -> list[StrategyAction]:
         """执行策略 - 仅入场逻辑。
 
         优先级：止盈/止损留待下一轮实现，本轮只做开新仓。
@@ -53,10 +53,10 @@ class MicroCapStrategy(Strategy):
         if current_count >= self.config.max_positions:
             return actions
 
-        actions.extend(await self._open_new_positions(current_count))
+        actions.extend(await self._open_new_positions(current_count, execution_id))
         return actions
 
-    async def _open_new_positions(self, current_count: int) -> list[StrategyAction]:
+    async def _open_new_positions(self, current_count: int, execution_id: str = "") -> list[StrategyAction]:
         """筛选买入信号并开新仓。"""
         actions: list[StrategyAction] = []
         candidates = await self.symbol_picker.pick()
@@ -79,31 +79,33 @@ class MicroCapStrategy(Strategy):
         for info in signals[:slots]:
             price = prices.get(info.symbol, 0.0)
             if price > 0:
+                is_breakout = info.cross_signal == CrossSignalType.GOLDEN
+                action_tag = "entry_breakout" if is_breakout else "entry_sideways"
                 self.exchange.open_position(
                     symbol=info.symbol,
                     direction=TradeDirection.LONG,
                     size=self.config.position_size_usdt,
                     price=price,
                     tag="micro_cap",
-                    reason=self._entry_reason(info),
+                    reason_text=f"开仓 @ {price}",
+                    reason_data={
+                        "action": action_tag,
+                        "cross_signal": info.cross_signal.value if info.cross_signal else None,
+                        "price": price,
+                        "size": self.config.position_size_usdt,
+                    },
+                    execution_id=execution_id,
                 )
                 actions.append(StrategyAction(
                     type="open",
                     symbol=info.symbol,
-                    detail=f"开仓 @ {price}",
+                    reason=f"开仓 @ {price}",
                 ))
         return actions
 
     def _is_buy_signal(self, info: SymbolInfo) -> bool:
         """判定是否为买入信号：横盘或近期金叉突破。"""
         return info.is_sideways_bottom or info.cross_signal == CrossSignalType.GOLDEN
-
-    @staticmethod
-    def _entry_reason(info: SymbolInfo) -> str:
-        """根据信号类型生成开仓原因，便于审计。"""
-        if info.cross_signal == CrossSignalType.GOLDEN:
-            return "micro_cap_entry_breakout"
-        return "micro_cap_entry_sideways"
 
     def get_status(self) -> dict[str, Any]:
         """获取策略状态。"""

@@ -31,5 +31,4 @@ class StrategyExecutionModel(Base):
     finished_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     action_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    actions_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

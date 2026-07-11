@@ -143,9 +143,7 @@ export function DashboardPage() {
                   >
                     <Badge variant="outline">{order.order_type}</Badge>
                     <span className="font-mono text-xs">{order.symbol}</span>
-                    <span className="flex-1 truncate text-muted-foreground">
-                      {order.reason}
-                    </span>
+                    <span className="flex-1" />
                     <span className="tabular-nums text-muted-foreground">
                       {order.size} @ {order.price}
                     </span>

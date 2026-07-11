@@ -151,11 +151,11 @@ class TestMicroCapExecuteEntry:
         # 预先开 2 个仓位
         exchange.open_position(
             symbol="AAAUSDT", direction=TradeDirection.LONG,
-            size=10, price=1.0, tag="micro_cap", reason="existing",
+            size=10, price=1.0, tag="micro_cap", reason_text="existing",
         )
         exchange.open_position(
             symbol="BBBUSDT", direction=TradeDirection.LONG,
-            size=10, price=1.0, tag="micro_cap", reason="existing",
+            size=10, price=1.0, tag="micro_cap", reason_text="existing",
         )
 
         config = MicroCapConfig(max_positions=2, position_size_usdt=10.0)
@@ -198,7 +198,7 @@ class TestMicroCapExecuteEntry:
         """隔离：已有持仓的 symbol 不重复开仓。"""
         exchange.open_position(
             symbol="AAAUSDT", direction=TradeDirection.LONG,
-            size=10, price=1.0, tag="micro_cap", reason="existing",
+            size=10, price=1.0, tag="micro_cap", reason_text="existing",
         )
 
         config = MicroCapConfig(max_positions=5, position_size_usdt=10.0)
@@ -267,7 +267,7 @@ class TestMicroCapExecuteEntry:
         # 预先存在一个 martingale 持仓
         exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason="martingale_entry",
+            size=100, price=50000, tag="martingale", reason_text="martingale_entry",
         )
 
         config = MicroCapConfig(max_positions=5, position_size_usdt=10.0)
@@ -296,7 +296,7 @@ class TestMicroCapStatus:
         """get_status 应返回配置和持仓统计。"""
         exchange.open_position(
             symbol="AAAUSDT", direction=TradeDirection.LONG,
-            size=10, price=1.0, tag="micro_cap", reason="entry",
+            size=10, price=1.0, tag="micro_cap", reason_text="entry",
         )
         strategy = MicroCapStrategy(
             exchange, MicroCapConfig(max_positions=5, position_size_usdt=10.0),

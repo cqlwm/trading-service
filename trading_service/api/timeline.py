@@ -29,14 +29,12 @@ def _serialize_event_data(data: SignalRecord | OrderRecord | CloseResult) -> dic
             "order_type": data.order_type,
             "size": data.size,
             "price": data.price,
-            "reason": data.reason,
         }
     elif isinstance(data, CloseResult):
         return {
             "position_id": data.position_id,
             "close_price": data.close_price,
             "pnl_pct": round(data.pnl_pct, 2),
-            "reason": data.reason,
         }
     return {}
 

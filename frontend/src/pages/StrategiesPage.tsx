@@ -59,7 +59,7 @@ function ExecutionHistoryPanel({ name }: { name: string }) {
                   </Badge>
                   {exec.actions.length > 0 && (
                     <span className="flex-1 truncate text-xs text-muted-foreground">
-                      {exec.actions.map((a) => `${a.symbol} ${a.detail}`).join('; ')}
+                      {exec.actions.map((a) => `${a.symbol} ${a.reason}`).join('; ')}
                     </span>
                   )}
                   {exec.error && (

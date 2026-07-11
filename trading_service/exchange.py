@@ -12,6 +12,7 @@ from trading_service.repository import (
     OrderRecord,
     PositionRecord,
     SignalRecord,
+    StrategyActionRecord,
     TradingRepository,
 )
 from trading_service.types import OrderType, TradeDirection
@@ -27,7 +28,6 @@ class CloseResult:
     position_id: str
     close_price: float
     pnl_pct: float
-    reason: str
 
 
 @dataclass
@@ -49,7 +49,6 @@ class Order:
     direction: TradeDirection
     size: float
     price: float
-    reason: str
     order_type: OrderType
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -62,7 +61,6 @@ class Order:
             direction=TradeDirection(record.direction),
             size=record.size,
             price=record.price,
-            reason=record.reason,
             order_type=OrderType(record.order_type),
             created_at=record.created_at,
         )
@@ -191,7 +189,6 @@ class MockExchange:
                     "order_type": o.order_type.value,
                     "size": o.size,
                     "price": o.price,
-                    "reason": o.reason,
                     "direction": o.direction.value,
                     "created_at": o.created_at.isoformat(),
                 }
@@ -203,9 +200,11 @@ class MockExchange:
         self,
         position_id: str,
         price: float | None = None,
-        reason: str = "manual",
+        reason_text: str = "手动平仓",
+        reason_data: dict[str, object] | None = None,
+        execution_id: str = "",
     ) -> CloseResult | None:
-        """平仓 - 关闭持仓并创建 CLOSE 订单（原子事务）。"""
+        """平仓 - 关闭持仓并创建 CLOSE 订单 + 动作记录（原子事务）。"""
         with self.db.transaction():
             pos = self.get_position(position_id)
             if pos is None or pos.status != "open":
@@ -221,23 +220,35 @@ class MockExchange:
             pos.closed_at = datetime.now(timezone.utc)
             self.db.save_position(pos.to_record())
 
+            order_id = self._new_id()
             order_record = OrderRecord(
-                id=self._new_id(),
+                id=order_id,
                 position_id=position_id,
                 symbol=pos.symbol,
                 direction=pos.direction.value,
                 size=pos.total_size,
                 price=actual_price,
                 order_type=OrderType.CLOSE.value,
-                reason=reason,
             )
             self.db.save_order(order_record)
+
+            # 写入动作记录 -- 决策层
+            self.db.save_action(StrategyActionRecord(
+                id=self._new_id(),
+                execution_id=execution_id,
+                strategy_name=pos.tag,
+                action_type="close",
+                symbol=pos.symbol,
+                position_id=position_id,
+                order_id=order_id,
+                reason_text=reason_text,
+                reason_data=reason_data or {},
+            ))
 
         return CloseResult(
             position_id=position_id,
             close_price=actual_price,
             pnl_pct=pnl_pct,
-            reason=reason,
         )
     def get_orders_filtered(
         self,
@@ -347,9 +358,11 @@ class MockExchange:
         size: float,
         price: float,
         tag: str,
-        reason: str,
+        reason_text: str = "",
+        reason_data: dict[str, object] | None = None,
+        execution_id: str = "",
     ) -> Position:
-        """开仓 - 创建持仓和对应的 OPEN 订单（原子事务）。"""
+        """开仓 - 创建持仓、OPEN 订单和动作记录（原子事务）。"""
         with self.db.transaction():
             position = Position(
                 id=self._new_id(),
@@ -362,17 +375,30 @@ class MockExchange:
             )
             self.db.save_position(position.to_record())
 
+            order_id = self._new_id()
             order_record = OrderRecord(
-                id=self._new_id(),
+                id=order_id,
                 position_id=position.id,
                 symbol=symbol,
                 direction=direction.value,
                 size=size,
                 price=price,
                 order_type=OrderType.OPEN.value,
-                reason=reason,
             )
             self.db.save_order(order_record)
+
+            # 写入动作记录 -- 决策层
+            self.db.save_action(StrategyActionRecord(
+                id=self._new_id(),
+                execution_id=execution_id,
+                strategy_name=tag,
+                action_type="open",
+                symbol=symbol,
+                position_id=position.id,
+                order_id=order_id,
+                reason_text=reason_text,
+                reason_data=reason_data or {},
+            ))
 
         return position
 
@@ -381,9 +407,11 @@ class MockExchange:
         position_id: str,
         size: float,
         price: float,
-        reason: str,
+        reason_text: str = "",
+        reason_data: dict[str, object] | None = None,
+        execution_id: str = "",
     ) -> Position:
-        """加仓 - 增加持仓数量并创建 ADD 订单（原子事务）。"""
+        """加仓 - 增加持仓数量、创建 ADD 订单和动作记录（原子事务）。"""
         with self.db.transaction():
             position = self.get_position(position_id)
             if position is None:
@@ -400,16 +428,29 @@ class MockExchange:
             self.db.save_position(position.to_record())
 
             # 创建 ADD 订单
+            order_id = self._new_id()
             order_record = OrderRecord(
-                id=self._new_id(),
+                id=order_id,
                 position_id=position_id,
                 symbol=position.symbol,
                 direction=position.direction.value,
                 size=size,
                 price=price,
                 order_type=OrderType.ADD.value,
-                reason=reason,
             )
             self.db.save_order(order_record)
+
+            # 写入动作记录 -- 决策层
+            self.db.save_action(StrategyActionRecord(
+                id=self._new_id(),
+                execution_id=execution_id,
+                strategy_name=position.tag,
+                action_type="add",
+                symbol=position.symbol,
+                position_id=position_id,
+                order_id=order_id,
+                reason_text=reason_text,
+                reason_data=reason_data or {},
+            ))
 
         return position

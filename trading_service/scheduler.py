@@ -15,11 +15,12 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from trading_service.repository import (
+    StrategyActionRecord,
     StrategyExecutionRecord,
     StrategyScheduleRecord,
     TradingRepository,
 )
-from trading_service.strategies.base import Strategy
+from trading_service.strategies.base import Strategy, StrategyAction
 
 logger = logging.getLogger(__name__)
 
@@ -196,11 +197,7 @@ class StrategyScheduler:
         logger.info(f"策略 {strategy_name} 定时执行开始 (execution_id={execution_id})")
 
         try:
-            actions = await strategy.execute()
-            actions_data = [
-                {"type": a.type, "symbol": a.symbol, "detail": a.detail}
-                for a in actions
-            ]
+            actions = await strategy.execute(execution_id=execution_id)
             finished_at = datetime.now(timezone.utc)
             self._repo.save_execution(StrategyExecutionRecord(
                 id=execution_id,
@@ -209,7 +206,6 @@ class StrategyScheduler:
                 finished_at=finished_at,
                 success=True,
                 action_count=len(actions),
-                actions_json=actions_data,
             ))
             logger.info(
                 f"策略 {strategy_name} 定时执行完成: {len(actions)} 项操作"
@@ -227,9 +223,59 @@ class StrategyScheduler:
             ))
             logger.error(f"策略 {strategy_name} 定时执行失败: {e}", exc_info=True)
 
+    async def execute_strategy_manually(
+        self, strategy_name: str
+    ) -> tuple[str, list[StrategyAction]]:
+        """手动执行策略，创建执行记录。返回 (execution_id, actions)。
+
+        与 _execute_strategy 逻辑相同，但同步返回结果。
+        手动执行也产生 execution record + action records。
+        """
+        strategy = self._strategies.get(strategy_name)
+        if strategy is None:
+            raise ValueError(f"策略不存在: {strategy_name}")
+
+        execution_id = self._new_id()
+        started_at = datetime.now(timezone.utc)
+
+        logger.info(f"策略 {strategy_name} 手动执行开始 (execution_id={execution_id})")
+
+        try:
+            actions = await strategy.execute(execution_id=execution_id)
+            finished_at = datetime.now(timezone.utc)
+            self._repo.save_execution(StrategyExecutionRecord(
+                id=execution_id,
+                strategy_name=strategy_name,
+                started_at=started_at,
+                finished_at=finished_at,
+                success=True,
+                action_count=len(actions),
+            ))
+            logger.info(
+                f"策略 {strategy_name} 手动执行完成: {len(actions)} 项操作"
+            )
+            return execution_id, actions
+        except Exception as e:
+            finished_at = datetime.now(timezone.utc)
+            self._repo.save_execution(StrategyExecutionRecord(
+                id=execution_id,
+                strategy_name=strategy_name,
+                started_at=started_at,
+                finished_at=finished_at,
+                success=False,
+                action_count=0,
+                error=str(e),
+            ))
+            logger.error(f"策略 {strategy_name} 手动执行失败: {e}", exc_info=True)
+            raise
+
     def list_executions(self, strategy_name: str, limit: int = 20, offset: int = 0) -> list[StrategyExecutionRecord]:
         """查询策略执行历史。"""
         return self._repo.list_executions(strategy_name, limit=limit, offset=offset)
+
+    def list_actions_by_execution(self, execution_id: str) -> list[StrategyActionRecord]:
+        """查询某次执行的所有动作记录。"""
+        return self._repo.list_actions_by_execution(execution_id)
 
     def list_all_schedules(self) -> list[dict[str, Any]]:
         """列出所有策略的调度状态。"""

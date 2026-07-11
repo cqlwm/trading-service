@@ -33,7 +33,6 @@ export interface Order {
   direction: TradeDirection
   size: number
   price: number
-  reason: string
   order_type: OrderType
   created_at: string
 }
@@ -64,7 +63,6 @@ export interface PositionOrder {
   order_type: OrderType
   size: number
   price: number
-  reason: string
   direction: TradeDirection
   created_at: string
 }
@@ -92,7 +90,6 @@ export interface ClosePositionResponse {
   position_id: string
   close_price: number
   pnl_pct: number
-  reason: string
 }
 
 /** 信号 —— GET /api/signals 列表项 */
@@ -125,14 +122,12 @@ export interface TimelineOrderData {
   order_type: OrderType
   size: number
   price: number
-  reason: string
 }
 
 export interface TimelineCloseData {
   position_id: string
   close_price: number
   pnl_pct: number
-  reason: string
 }
 
 /** 时间线事件 —— GET /api/timeline 或 GET /api/story/{symbol} */
@@ -161,7 +156,7 @@ export interface StrategyExecution {
   finished_at: string | null
   success: boolean
   action_count: number
-  actions: StrategyAction[]
+  actions: StrategyActionRecord[]
   error: string | null
 }
 
@@ -196,17 +191,30 @@ export interface MicroCapStatus {
   schedule: StrategySchedule | null
 }
 
-/** 策略执行动作 */
+/** 策略动作记录 -- 执行历史中的单个动作（决策层） */
+export interface StrategyActionRecord {
+  id: string
+  action_type: string // "open" | "add" | "close" | "skip"
+  symbol: string
+  position_id: string
+  order_id: string
+  reason: string
+  reason_data: Record<string, unknown>
+  created_at: string
+}
+
+/** 策略执行动作 -- 手动执行 API 响应中的动作摘要 */
 export interface StrategyAction {
   type: string // "open" | "add" | "close" | "skip"
   symbol: string
-  detail: string
+  reason: string
 }
 
 /** 策略执行响应 */
 export interface StrategyExecuteResponse {
   status: string
   strategy: string
+  execution_id: string
   actions: StrategyAction[]
   action_count: number
 }

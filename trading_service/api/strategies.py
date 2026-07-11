@@ -11,20 +11,21 @@ router = APIRouter(tags=["strategies"])
 def _format_actions(actions: list) -> list[dict[str, str]]:
     """格式化策略动作为 API 响应。"""
     return [
-        {"type": a.type, "symbol": a.symbol, "detail": a.detail}
+        {"type": a.type, "symbol": a.symbol, "reason": a.reason}
         for a in actions
     ]
 
 
 @router.post("/martingale/execute")
 async def execute_martingale(
-    strategy: MartingaleDep,
+    scheduler: SchedulerDep,
 ) -> dict[str, Any]:
     """执行马丁策略。"""
-    actions = await strategy.execute()
+    execution_id, actions = await scheduler.execute_strategy_manually("martingale")
     return {
         "status": "ok",
         "strategy": "martingale",
+        "execution_id": execution_id,
         "actions": _format_actions(actions),
         "action_count": len(actions),
     }
@@ -42,13 +43,14 @@ async def get_martingale_status(
 
 @router.post("/micro-cap/execute")
 async def execute_micro_cap(
-    strategy: MicroCapDep,
+    scheduler: SchedulerDep,
 ) -> dict[str, Any]:
     """执行微市值策略。"""
-    actions = await strategy.execute()
+    execution_id, actions = await scheduler.execute_strategy_manually("micro_cap")
     return {
         "status": "ok",
         "strategy": "micro_cap",
+        "execution_id": execution_id,
         "actions": _format_actions(actions),
         "action_count": len(actions),
     }
@@ -76,13 +78,14 @@ async def get_micro_cap_history(
 
 @router.post("/martingale-short/execute")
 async def execute_martingale_short(
-    strategy: MartingaleShortDep,
+    scheduler: SchedulerDep,
 ) -> dict[str, Any]:
     """执行马丁做空策略。"""
-    actions = await strategy.execute()
+    execution_id, actions = await scheduler.execute_strategy_manually("martingale_short")
     return {
         "status": "ok",
         "strategy": "martingale_short",
+        "execution_id": execution_id,
         "actions": _format_actions(actions),
         "action_count": len(actions),
     }
@@ -148,19 +151,32 @@ async def get_strategy_executions(
 ) -> dict[str, Any]:
     """查看策略执行历史。"""
     executions = scheduler.list_executions(strategy_name, limit=limit, offset=offset)
+    result = []
+    for e in executions:
+        actions = scheduler.list_actions_by_execution(e.id)
+        result.append({
+            "id": e.id,
+            "strategy_name": e.strategy_name,
+            "started_at": e.started_at.isoformat(),
+            "finished_at": e.finished_at.isoformat() if e.finished_at else None,
+            "success": e.success,
+            "action_count": e.action_count,
+            "error": e.error,
+            "actions": [
+                {
+                    "id": a.id,
+                    "action_type": a.action_type,
+                    "symbol": a.symbol,
+                    "position_id": a.position_id,
+                    "order_id": a.order_id,
+                    "reason": a.reason_text,
+                    "reason_data": a.reason_data,
+                    "created_at": a.created_at.isoformat(),
+                }
+                for a in actions
+            ],
+        })
     return {
-        "data": [
-            {
-                "id": e.id,
-                "strategy_name": e.strategy_name,
-                "started_at": e.started_at.isoformat(),
-                "finished_at": e.finished_at.isoformat() if e.finished_at else None,
-                "success": e.success,
-                "action_count": e.action_count,
-                "actions": e.actions_json,
-                "error": e.error,
-            }
-            for e in executions
-        ],
-        "total": len(executions),
+        "data": result,
+        "total": len(result),
     }

@@ -146,9 +146,6 @@ export function PositionDetailDrawer({
                         价格 <span className="font-mono text-foreground">{formatPrice(order.price)}</span>
                       </span>
                     </div>
-                    {order.reason && (
-                      <p className="mt-1.5 text-xs text-muted-foreground">{order.reason}</p>
-                    )}
                   </div>
                 ))
               )}

@@ -80,7 +80,6 @@ export function OrdersPage() {
                   <TableHead>方向</TableHead>
                   <TableHead className="text-right">数量</TableHead>
                   <TableHead className="text-right">价格</TableHead>
-                  <TableHead>原因</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -103,9 +102,6 @@ export function OrdersPage() {
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {formatPrice(order.price)}
-                    </TableCell>
-                    <TableCell className="max-w-xs truncate text-xs text-muted-foreground">
-                      {order.reason}
                     </TableCell>
                   </TableRow>
                 ))}

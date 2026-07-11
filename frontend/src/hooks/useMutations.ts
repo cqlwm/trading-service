@@ -50,7 +50,7 @@ export function useExecuteStrategy(strategy: 'martingale' | 'micro-cap' | 'marti
         toast.info(`${label}策略执行完成，本轮无操作`)
       } else {
         const summary = data.actions
-          .map((a) => `${a.symbol} ${a.detail}`)
+          .map((a) => `${a.symbol} ${a.reason}`)
           .join('\n')
         toast.success(`${label}策略执行完成，共 ${data.action_count} 项操作：\n${summary}`, {
           duration: 6000,

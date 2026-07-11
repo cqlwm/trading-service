@@ -10,6 +10,7 @@ from trading_service.repository import (
     OrderRecord,
     PositionRecord,
     SignalRecord,
+    StrategyActionRecord,
     StrategyExecutionRecord,
     StrategyScheduleRecord,
     TradingRepository,
@@ -53,9 +54,11 @@ class InMemoryTradingRepository(TradingRepository):
         self.positions: dict[str, PositionRecord] = {}
         self.orders: dict[str, OrderRecord] = {}
         self.signals: dict[str, SignalRecord] = {}
+        self.actions: dict[str, StrategyActionRecord] = {}
         self._in_transaction = False
         self._temp_positions: dict[str, PositionRecord] = {}
         self._temp_orders: dict[str, OrderRecord] = {}
+        self._temp_actions: dict[str, StrategyActionRecord] = {}
 
     def _new_id(self) -> str:
         return uuid.uuid4().hex[:12]
@@ -64,20 +67,24 @@ class InMemoryTradingRepository(TradingRepository):
         self._in_transaction = True
         self._temp_positions = {}
         self._temp_orders = {}
+        self._temp_actions = {}
 
     def commit(self) -> None:
         if self._in_transaction:
             self.positions.update(self._temp_positions)
             self.orders.update(self._temp_orders)
+            self.actions.update(self._temp_actions)
             self._in_transaction = False
             self._temp_positions = {}
             self._temp_orders = {}
+            self._temp_actions = {}
 
     def rollback(self) -> None:
         if self._in_transaction:
             self._in_transaction = False
             self._temp_positions = {}
             self._temp_orders = {}
+            self._temp_actions = {}
 
     def save_position(self, position: PositionRecord) -> None:
         if self._in_transaction:
@@ -252,6 +259,33 @@ class InMemoryTradingRepository(TradingRepository):
         ]
         results.sort(key=lambda e: e.started_at, reverse=True)
         return results[offset:offset + limit]
+
+    def save_action(self, action: StrategyActionRecord) -> None:
+        if self._in_transaction:
+            self._temp_actions[action.id] = action
+        else:
+            self.actions[action.id] = action
+
+    def list_actions_by_execution(self, execution_id: str) -> list[StrategyActionRecord]:
+        results = list(self.actions.values())
+        if self._in_transaction:
+            results = results + list(self._temp_actions.values())
+        results = [a for a in results if a.execution_id == execution_id]
+        results.sort(key=lambda a: a.created_at)
+        return results
+
+    def list_actions_by_position(self, position_id: str) -> list[StrategyActionRecord]:
+        results = list(self.actions.values())
+        if self._in_transaction:
+            results = results + list(self._temp_actions.values())
+        results = [a for a in results if a.position_id == position_id]
+        results.sort(key=lambda a: a.created_at)
+        return results
+
+    def list_actions_by_symbol(self, symbol: str, limit: int = 50) -> list[StrategyActionRecord]:
+        results = [a for a in self.actions.values() if a.symbol == symbol]
+        results.sort(key=lambda a: a.created_at)
+        return results[:limit]
 
 
 @pytest.fixture

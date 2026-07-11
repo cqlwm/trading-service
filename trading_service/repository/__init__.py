@@ -15,6 +15,7 @@ from trading_service.repository.abc import (
     OrderRecord,
     PositionRecord,
     SignalRecord,
+    StrategyActionRecord,
     StrategyExecutionRecord,
     StrategyScheduleRecord,
 )
@@ -31,6 +32,7 @@ from trading_service.repository.models import (
     OrderModel,
     PositionModel,
     SignalModel,
+    StrategyActionModel,
     StrategyExecutionModel,
     StrategyScheduleModel,
 )
@@ -42,6 +44,7 @@ __all__ = [
     "SignalRecord",
     "StrategyScheduleRecord",
     "StrategyExecutionRecord",
+    "StrategyActionRecord",
     # 抽象接口
     "TradingRepository",
     # SQLAlchemy 实现
@@ -53,4 +56,5 @@ __all__ = [
     "SignalModel",
     "StrategyScheduleModel",
     "StrategyExecutionModel",
+    "StrategyActionModel",
 ]
