@@ -18,6 +18,7 @@ from trading_service.pickers.backtest import (
     simulate_trade,
     summarize,
 )
+from trading_service.pickers.bullish_kline_filter import BullishKlineFilter
 from trading_service.pickers.signal import is_delisting_soon, is_notable_signal
 from trading_service.pickers.short_signal_filter import ShortSignalFilter
 from trading_service.pickers.symbol_picker import (
@@ -50,6 +51,7 @@ __all__ = [
     "TechnicalAnalysisFilter",
     "CrossSignal",
     # 过滤器实现
+    "BullishKlineFilter",
     "ShortSignalFilter",
     # 技术信号判定（展示层/策略层按需过滤）
     "is_notable_signal",

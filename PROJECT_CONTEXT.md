@@ -9,7 +9,9 @@ trading_service/
 ├── pickers/           # ✅ 选币管道统一放在这里！不要再创建symbol_picker.py了！
 │   ├── base.py                  # 核心契约：SymbolInfo / ISymbolPicker / StaticListSymbolPicker
 │   ├── pipeline.py              # ISymbolSource / ISymbolFilter / SelectionPipeline 编排器
-│   ├── symbol_picker.py         # AlphaTokenSource 数据源（基础选币，不含技术分析）
+│   ├── kline_utils.py           # ensure_klines（按需拉取缓存）+ build_ohlcv_dataframe
+│   ├── symbol_picker.py         # AlphaTokenSource 数据源（只提供候选集，不做交易筛选）
+│   ├── bullish_kline_filter.py  # BullishKlineFilter（阳线过滤，丢弃式）
 │   ├── technical_analyzer.py    # ITechnicalAnalyzer / TechnicalAnalyzer 技术分析工具
 │   ├── technical_filter.py      # TechnicalAnalysisFilter（纯增强技术阶段）
 │   ├── signal.py                # 信号判定纯函数：is_notable_signal / is_delisting_soon
@@ -91,26 +93,32 @@ class SymbolInfo:
     price_change_pct_24h: float = 0.0
     # Alpha扩展字段
     base_asset: str = ""
-    yesterday_change_percent: float = 0.0
-    # 技术分析字段（由 TechnicalAnalysisFilter 回填，从 klines 派生，过渡保留）
-    sma_200: float | None = None
-    cross_signal: CrossSignalType | None = None
-    is_sideways_bottom: bool = False
-    volatility_10: float | None = None
-    # K线+指标 DataFrame（由 TechnicalAnalysisFilter 构建，一次拉取处处复用）
-    # 列：datetime, open, high, low, close, volume, sma_200, cross_signal, ...
-    # 加新指标只需追加列，不改 SymbolInfo。检测器和策略复用此 DataFrame。
-    klines: pd.DataFrame | None = None
+    # K线+指标 DataFrame（多时间框架，按 interval 字符串索引）
+    # key: "4h" / "1d" / ...  value: DataFrame(OHLCV + 指标列)
+    # 由各 filter 按需拉取并构建，检测器和策略复用，不重新拉取。
+    klines: dict[str, pd.DataFrame] = field(default_factory=dict)
     # 合约生命周期字段（AlphaTokenSource 从 exchangeInfo 回填）
     delivery_date: int | None = None  # 永续正常=哨兵值，即将下架=具体时点(ms)
     # ...
 
-## DataFrame K线复用原则（2026-07-12 重构）
-- K 线只在 TechnicalAnalysisFilter 拉 API 一次，构建为 DataFrame 挂到 info.klines
-- 后续 ShortSignalFilter、信号检测器、策略全部复用 DataFrame，不重新拉 K 线
+## DataFrame K线复用原则（多时间框架）
+- klines 是 dict[str, pd.DataFrame]，key 为 interval（如 "4h"、"1d"），支持多时间框架
+- 各 filter（BullishKlineFilter、TechnicalAnalysisFilter）按需拉取并存入对应 key
+- 后续 ShortSignalFilter、信号检测器、策略复用已有 DataFrame，不重新拉取
+- 检测器可选注入 KlineClient：若所需 interval 的 DataFrame 缺失，lazy-fetch 并缓存（ensure_klines）
 - 加新指标（如 RSI、SuperTrend）：在 filter 或检测器中用 TA-Lib 算，追加为 DataFrame 列
-- 检测器自给自足：需要的指标如果 DataFrame 没有，检测器自己算并追加列
-- 检测器和过滤器优先读 DataFrame，回退到旧字段（过渡兼容）
+- 加新时间框架：只需在 filter 中拉取并存入新 key，不改 SymbolInfo
+- 所有技术指标统一由 DataFrame 承载，SymbolInfo 不持有冗余快照字段
+
+## ISymbolSource / ISymbolFilter 职责分离（2026-07-11 重构）
+- ISymbolSource（数据源）：只提供候选集，不做交易筛选
+  - AlphaTokenSource：Alpha 代币 + 市值门槛 + 合约可交易（不拉 K 线、不做阳线过滤）
+  - TopGainersSource：涨幅榜 + 成交量门槛
+- ISymbolFilter（过滤器）：负责交易筛选和数据增强
+  - BullishKlineFilter：拉 1d K 线存入 klines["1d"]，丢弃昨日非阳线（丢弃式）
+  - TechnicalAnalysisFilter：拉 4h K 线存入 klines["4h"]，算 SMA200 + 金叉/死叉（纯增强）
+  - ShortSignalFilter：读 klines["4h"]，丢弃非做空信号（丢弃式）
+- SelectionPipeline 串联 source + filters，对外暴露 ISymbolPicker.pick()
 
 ## 信号判定纯函数（pickers/signal.py）
 - is_notable_signal(info) -> bool：金叉/靠近均线/横盘返回True，死叉/None返回False
@@ -196,7 +204,7 @@ SignalRecord    ->    StrategyActionRecord  ->   OrderRecord
    注意：ccxt 会把永续/哨兵值的 expiry 置 None 丢弃，但我们用 Pydantic
    直接建模原始字段（BinanceFutureSymbol.delivery_date），能拿到真值。
 10. ⚠️ TechnicalAnalysisFilter 是「纯增强不丢弃」设计（有测试保护的不变量）：
-    死叉(DEAD)和无信号(None)的代币都会保留，只回填技术字段。
+    死叉(DEAD)和无信号(None)的代币都会保留，klines DataFrame 中不写入信号列。
     展示层/策略层按需用 is_notable_signal() 过滤，不要改 filter 本身！
 11. ⚠️ 回测生存者偏差（未解决）：候选池是「当前仍在交易的」代币，
     已下架的币不在候选池里 -> loss 永远为0 -> 胜率虚高100%。

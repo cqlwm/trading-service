@@ -3,8 +3,26 @@ from __future__ import annotations
 
 import pytest
 
+import pandas as pd
+
 from trading_service.pickers import ShortSignalFilter, SymbolInfo
 from trading_service.types import CrossSignalType
+
+
+def _make_klines_df(
+    cross_signal: str | None = None,
+    price_vs_sma200: float | None = None,
+) -> pd.DataFrame:
+    """构建含指标列的 DataFrame。"""
+    return pd.DataFrame([{
+        "datetime": 0,
+        "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0,
+        "sma_200": 1.0,
+        "cross_signal": cross_signal,
+        "price_vs_sma200_percent": price_vs_sma200,
+        "volatility_10": 0.0,
+        "is_sideways_bottom": False,
+    }])
 
 
 def _make_info(
@@ -12,10 +30,10 @@ def _make_info(
     cross_signal: CrossSignalType | None = None,
     price_vs_sma200: float | None = None,
 ) -> SymbolInfo:
-    """构造测试用 SymbolInfo。"""
+    """构造测试用 SymbolInfo（带 klines["4h"] DataFrame）。"""
+    cross_str = cross_signal.value if cross_signal else None
     info = SymbolInfo(symbol=symbol)
-    info.cross_signal = cross_signal
-    info.price_vs_sma200_percent = price_vs_sma200
+    info.klines["4h"] = _make_klines_df(cross_signal=cross_str, price_vs_sma200=price_vs_sma200)
     return info
 
 
@@ -86,55 +104,10 @@ class TestShortSignalFilter:
         symbols = {r.symbol for r in result}
         assert symbols == {"BTCUSDT", "SOLUSDT"}
 
-
-def _make_klines_df(
-    cross_signal: str | None = None,
-    price_vs_sma200: float | None = None,
-):
-    """构建含指标列的 DataFrame。"""
-    import pandas as pd
-    return pd.DataFrame([{
-        "close": 1.0,
-        "cross_signal": cross_signal,
-        "price_vs_sma200_percent": price_vs_sma200,
-    }])
-
-
-class TestShortSignalFilterDataFrame:
-    """测试从 DataFrame 读取指标。"""
-
     @pytest.mark.asyncio
-    async def test_keeps_dead_cross_from_dataframe(self) -> None:
-        """从 DataFrame 读死叉信号应保留。"""
+    async def test_no_klines_drops(self) -> None:
+        """无 klines["4h"] 数据的候选币应丢弃（无信号可判）。"""
         flt = ShortSignalFilter(overbought_threshold=15.0)
-        info = SymbolInfo(symbol="BTCUSDT")
-        info.klines = _make_klines_df(cross_signal="dead")
-        result = await flt.apply([info])
-        assert len(result) == 1
-
-    @pytest.mark.asyncio
-    async def test_keeps_overbought_from_dataframe(self) -> None:
-        """从 DataFrame 读超买应保留。"""
-        flt = ShortSignalFilter(overbought_threshold=15.0)
-        info = SymbolInfo(symbol="BTCUSDT")
-        info.klines = _make_klines_df(price_vs_sma200=20.0)
-        result = await flt.apply([info])
-        assert len(result) == 1
-
-    @pytest.mark.asyncio
-    async def test_drops_golden_from_dataframe(self) -> None:
-        """从 DataFrame 读金叉应丢弃。"""
-        flt = ShortSignalFilter(overbought_threshold=15.0)
-        info = SymbolInfo(symbol="BTCUSDT")
-        info.klines = _make_klines_df(cross_signal="golden")
+        info = SymbolInfo(symbol="BTCUSDT")  # klines={}
         result = await flt.apply([info])
         assert len(result) == 0
-
-    @pytest.mark.asyncio
-    async def test_dataframe_takes_priority(self) -> None:
-        """DataFrame 有值时优先于旧字段。"""
-        flt = ShortSignalFilter(overbought_threshold=15.0)
-        info = SymbolInfo(symbol="BTCUSDT", cross_signal=CrossSignalType.GOLDEN)  # 旧字段金叉
-        info.klines = _make_klines_df(cross_signal="dead")  # DataFrame 死叉
-        result = await flt.apply([info])
-        assert len(result) == 1, "应以 DataFrame 为准（死叉保留）"

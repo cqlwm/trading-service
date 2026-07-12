@@ -1,7 +1,7 @@
 """技术信号判定工具：从 SymbolInfo 提炼可关注信号。
 
 与 TechnicalAnalysisFilter 的「纯增强不丢弃」职责分离：
-- filter 只回填技术字段，保留所有代币；
+- filter 只构建 klines DataFrame，保留所有代币；
 - 本模块判定单个 SymbolInfo 是否值得关注，供展示层/策略层按需过滤。
 """
 from __future__ import annotations
@@ -11,7 +11,8 @@ from trading_service.pickers.symbol_picker import PERPETUAL_DELIVERY_SENTINEL
 from trading_service.types import CrossSignalType
 
 # 值得关注的穿越信号（死叉 DEAD 属于消极信号，不在此列）
-_NOTABLE_CROSS_SIGNALS = frozenset({CrossSignalType.GOLDEN, CrossSignalType.NEAR})
+# 值为字符串，与 DataFrame 中 cross_signal 列一致
+_NOTABLE_CROSS_SIGNALS = frozenset({CrossSignalType.GOLDEN.value, CrossSignalType.NEAR.value})
 
 
 def is_notable_signal(info: SymbolInfo) -> bool:
@@ -19,10 +20,23 @@ def is_notable_signal(info: SymbolInfo) -> bool:
 
     死叉(DEAD)与无信号(None)返回 False。
     底部横盘优先：即便穿越信号为死叉，只要横盘即为关注信号。
+
+    从 klines DataFrame 最后一行读取指标；无 4h 数据时返回 False。
     """
-    if info.is_sideways_bottom:
+    df = info.klines.get("4h")
+    if df is None or len(df) == 0:
+        return False
+
+    latest = df.iloc[-1]
+
+    sideways_val = latest.get("is_sideways_bottom")
+    is_sideways = bool(sideways_val) if sideways_val is not None else False
+    if is_sideways:
         return True
-    return info.cross_signal in _NOTABLE_CROSS_SIGNALS
+
+    cross_val = latest.get("cross_signal")
+    cross = cross_val if isinstance(cross_val, str) else None
+    return cross in _NOTABLE_CROSS_SIGNALS
 
 
 def is_delisting_soon(info: SymbolInfo) -> bool:

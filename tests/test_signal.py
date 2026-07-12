@@ -4,21 +4,40 @@
 死叉(DEAD)与无信号(None)返回 False。
 
 纯函数测试：覆盖正常路径、边界（死叉）、空值（None/默认值）、组合、幂等。
+指标从 klines DataFrame 最后一行读取。
 """
 from __future__ import annotations
 
+import pandas as pd
+
 from trading_service.pickers import SymbolInfo, is_notable_signal
 from trading_service.types import CrossSignalType
+
+
+def make_klines_df(
+    cross_signal: str | None = None,
+    is_sideways_bottom: bool = False,
+) -> pd.DataFrame:
+    """构建含指标列的 DataFrame（模拟 TechnicalAnalysisFilter 的输出）。"""
+    return pd.DataFrame([{
+        "datetime": 0,
+        "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0,
+        "sma_200": 1.0,
+        "cross_signal": cross_signal,
+        "price_vs_sma200_percent": 0.0,
+        "volatility_10": 0.0,
+        "is_sideways_bottom": is_sideways_bottom,
+    }])
 
 
 def make_info(
     cross_signal: CrossSignalType | None = None,
     is_sideways_bottom: bool = False,
 ) -> SymbolInfo:
-    """构造带技术字段的 SymbolInfo。"""
+    """构造带 klines["4h"] DataFrame 的 SymbolInfo。"""
+    cross_str = cross_signal.value if cross_signal else None
     info = SymbolInfo(symbol="TESTUSDT")
-    info.cross_signal = cross_signal
-    info.is_sideways_bottom = is_sideways_bottom
+    info.klines["4h"] = make_klines_df(cross_signal=cross_str, is_sideways_bottom=is_sideways_bottom)
     return info
 
 
@@ -55,9 +74,9 @@ class TestNotableSignalNegative:
         assert is_notable_signal(info) is False, "无信号应返回 False"
 
     def test_defaults_returns_false(self) -> None:
-        """❌ 全新 SymbolInfo 默认值应返回 False。"""
+        """❌ 全新 SymbolInfo（无 klines）应返回 False。"""
         info = SymbolInfo(symbol="TESTUSDT")
-        assert is_notable_signal(info) is False, "默认值应返回 False"
+        assert is_notable_signal(info) is False, "无 klines 应返回 False"
 
 
 class TestNotableSignalCombination:

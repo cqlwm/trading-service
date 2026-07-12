@@ -194,25 +194,26 @@ class ISymbolPicker(ABC):
 **设计要点**：
 - `pick()` 为 **async** 方法，同步 IO 实现需用 `run_in_executor` 包装
 - 返回 `list[SymbolInfo]`（富数据载体），而非裸 `list[str]`
-- `SymbolInfo` 定义在 `pickers/base.py`，包含基础字段、Alpha 扩展字段、技术分析字段三组
-  （技术字段由 `TechnicalAnalysisFilter` 回填，数据源只填基础字段）
+- `SymbolInfo` 定义在 `pickers/base.py`，包含基础字段、Alpha 扩展字段、
+  klines（多时间框架 DataFrame）三组。数据源只填基础字段，K 线由各 filter 按需拉取。
 
 ### 3.4 实现类
 
 | 类 | 接口 | 数据源 | 用途 |
 |----|------|--------|------|
 | `StaticListSymbolPicker` | `ISymbolPicker` | 静态字符串列表 | 测试 / DI 占位（Martingale） |
-| `AlphaTokenSource` | `ISymbolSource` | 币安 Alpha 代币 API + 合约日 K | 真实选币（基础筛选，不含技术分析） |
-| `TechnicalAnalysisFilter` | `ISymbolFilter` | 合约 K 线 + `ITechnicalAnalyzer` | 纯增强：回填 200 均线技术字段，不丢弃 |
+| `AlphaTokenSource` | `ISymbolSource` | 币安 Alpha 代币 API + 合约信息 | 候选集构建（不做交易筛选） |
+| `BullishKlineFilter` | `ISymbolFilter` | 1d K 线 | 丢弃式：存入 klines["1d"]，丢弃昨日非阳线 |
+| `TechnicalAnalysisFilter` | `ISymbolFilter` | 4h K 线 + `ITechnicalAnalyzer` | 纯增强：存入 klines["4h"]，算 SMA200 指标，不丢弃 |
+| `ShortSignalFilter` | `ISymbolFilter` | 读 klines["4h"] | 丢弃式：保留死叉/超买信号 |
 | `SelectionPipeline` | `ISymbolPicker` | source + filters 编排 | 组合 source 与 filter，对策略透明 |
 
-**AlphaTokenSource 筛选条件**（只做基础筛选）：
+**AlphaTokenSource 职责**（只提供候选集，不做交易筛选）：
 1. Alpha 代币，市值 5000 万 USDT 以下
 2. 在合约交易所存在且处于可交易状态（status=="TRADING", quoteAsset=="USDT"）
-3. 昨日 K 线为阳线（收盘价 >= 开盘价）
 
-> MicroCapStrategy 通过 `SelectionPipeline(source=AlphaTokenSource(...), filters=[TechnicalAnalysisFilter(...)])`
-> 组合选币与技术分析。MartingaleStrategy 直接用 `StaticListSymbolPicker`。
+> MicroCapStrategy 通过 `SelectionPipeline(source=AlphaTokenSource(...), filters=[BullishKlineFilter(...), TechnicalAnalysisFilter(...)])`
+> 组合候选集构建与技术分析。MartingaleStrategy 直接用 `StaticListSymbolPicker`。
 
 ### 3.5 调用流程
 
@@ -230,31 +231,36 @@ sequenceDiagram
     Source->>Binance: get_alpha_tokens() + get_future_exchange_info()
     Binance-->>Source: Alpha 代币 + 可交易合约
     Source->>Source: 取交集 + 市值过滤
-    Source->>Binance: get_future_klines(symbol, "1d")
-    Binance-->>Source: 昨日 K 线
-    Source->>Source: 阳线过滤
     Source-->>Pipeline: list[SymbolInfo]（基础字段）
-    Pipeline->>Filter: apply(infos)
+    Pipeline->>BullishFilter: apply(infos)
     loop 每个 SymbolInfo
-        Filter->>Binance: get_future_klines(symbol, interval, 210)
-        Binance-->>Filter: K 线序列
-        Filter->>Analyzer: detect_200sma_signal(klines)
-        Analyzer-->>Filter: CrossSignal | None
-        Note over Filter: 纯增强：回填技术字段，不丢弃
+        BullishFilter->>Binance: get_future_klines(symbol, "1d", 5)
+        Binance-->>BullishFilter: 1d K 线
+        Note over BullishFilter: 存入 klines["1d"]，丢弃非阳线
     end
-    Filter-->>Pipeline: list[SymbolInfo]（含技术字段）
+    BullishFilter-->>Pipeline: list[SymbolInfo]（含 klines["1d"]）
+    Pipeline->>TechFilter: apply(infos)
+    loop 每个 SymbolInfo
+        TechFilter->>Binance: get_future_klines(symbol, "4h", 210)
+        Binance-->>TechFilter: 4h K 线序列
+        TechFilter->>Analyzer: detect_200sma_signal(df)
+        Analyzer-->>TechFilter: CrossSignal | None
+        Note over TechFilter: 纯增强：写入 klines["4h"]，不丢弃
+    end
+    TechFilter-->>Pipeline: list[SymbolInfo]（含 klines["1d"] + klines["4h"]）
     Pipeline-->>Strategy: list[SymbolInfo]
 ```
 
 ### 3.6 客户端协议（降低耦合）
 
-`AlphaTokenSource` 与 `TechnicalAnalysisFilter` 不依赖具体的 `BinanceClient`，
+`AlphaTokenSource`、`BullishKlineFilter` 与 `TechnicalAnalysisFilter` 不依赖具体的 `BinanceClient`，
 而是依赖 `clients/protocols.py` 中定义的结构化协议（Protocol）：
 
 | 协议 | 方法 | 消费者 |
 |------|------|--------|
-| `KlineClient` | `get_future_klines` | `TechnicalAnalysisFilter` |
-| `MarketDataClient` | `+ get_alpha_tokens` / `get_future_exchange_info` | `AlphaTokenSource` |
+| `KlineClient` | `get_future_klines` | `TechnicalAnalysisFilter`、`BullishKlineFilter` |
+| `AlphaUniverseClient` | `get_alpha_tokens` / `get_future_exchange_info` | `AlphaTokenSource` |
+| `MarketDataClient` | 上述两者的超集 | 需要全部能力的消费者 |
 
 `BinanceClient` 在结构上满足这些协议，无需显式继承；测试可注入内存实现（duck typing）。
 
@@ -282,7 +288,8 @@ class ITechnicalAnalyzer(ABC):
 - 通过**依赖注入**提供给 `TechnicalAnalysisFilter`（构造函数 `analyzer` 参数），便于单元测试替换 mock
 - `TechnicalAnalyzer` 是默认实现，提供 SMA 计算、200 均线穿越信号检测、底部横盘判定
 - 所有计算方法无状态，可安全共享单例
-- `TechnicalAnalysisFilter` 是**纯增强**：analyzer 返回 None 时 SymbolInfo 数量不减、技术字段保持默认；买入信号判定由策略负责（`MicroCapStrategy._is_buy_signal`）
+- `TechnicalAnalysisFilter` 是**纯增强**：analyzer 返回 None 时 SymbolInfo 数量不减、klines DataFrame 不含信号列；买入信号判定由策略负责
+- 所有技术指标统一由 `klines` DataFrame 承载，`SymbolInfo` 不持有冗余快照字段。检测器、过滤器、策略均从 DataFrame 最后一行读取指标
 
 ### 4.2 信号类型
 
@@ -375,7 +382,7 @@ graph TD
 - `is_sideways_bottom == True`：底部横盘（低波动 + 价格在 200 均线上方）
 - `cross_signal == CrossSignalType.GOLDEN`：金叉，收盘价从下向上突破 200 均线（近期突破）
 
-> 选币与技术分析由 `SelectionPipeline(source=AlphaTokenSource, filters=[TechnicalAnalysisFilter])` 完成，策略只消费 `SymbolInfo` 的技术字段。
+> 选币与技术分析由 `SelectionPipeline(source=AlphaTokenSource, filters=[TechnicalAnalysisFilter])` 完成，策略只消费 `SymbolInfo.klines` DataFrame 中的指标。
 
 ### 5.2 配置参数 (MicroCapConfig)
 
@@ -391,7 +398,7 @@ graph TD
 ### 5.3 入场逻辑
 
 1. **检查配额**：当前 `tag="micro_cap"` 的 open 持仓数 >= `max_positions` 则直接返回
-2. **选币**：`symbol_picker.pick()` 返回候选 `SymbolInfo`（已含技术分析字段）
+2. **选币**：`symbol_picker.pick()` 返回候选 `SymbolInfo`（已含 klines DataFrame）
 3. **过滤**：排除已持仓 symbol；只保留 `_is_buy_signal` 通过的
 4. **开仓**：按 `max_positions - current_count` 配额，对候选开多仓
    - `size = position_size_usdt`（10 USDT）

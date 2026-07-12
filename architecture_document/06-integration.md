@@ -117,15 +117,17 @@ sequenceDiagram
     Source->>Binance: get_alpha_tokens() + get_future_exchange_info()
     Binance-->>Source: Alpha 代币 + 可交易合约
     Source->>Source: 取交集 + 市值 < 5000万 过滤
-    Source->>Binance: get_future_klines(symbol, "1d")
-    Binance-->>Source: 昨日 K 线
-    Source->>Source: 阳线过滤
     Source-->>Pipeline: list[SymbolInfo]（基础字段）
-    Pipeline->>Filter: apply(infos)
-    Filter->>Analyzer: detect_200sma_signal(klines)
-    Analyzer-->>Filter: CrossSignal | None
-    Note over Filter: 纯增强：回填技术字段，不丢弃
-    Filter-->>Pipeline: list[SymbolInfo]（含技术字段）
+    Pipeline->>BullishFilter: apply(infos)
+    BullishFilter->>Binance: get_future_klines(symbol, "1d", 5)
+    Binance-->>BullishFilter: 1d K 线
+    Note over BullishFilter: 存入 klines["1d"]，丢弃非阳线
+    BullishFilter-->>Pipeline: list[SymbolInfo]（含 klines["1d"]）
+    Pipeline->>TechFilter: apply(infos)
+    TechFilter->>Analyzer: detect_200sma_signal(df)
+    Analyzer-->>TechFilter: CrossSignal | None
+    Note over TechFilter: 纯增强：写入 klines["4h"]，不丢弃
+    TechFilter-->>Pipeline: list[SymbolInfo]（含 klines["1d"] + klines["4h"]）
     Pipeline-->>Strategy: list[SymbolInfo]
 ```
 

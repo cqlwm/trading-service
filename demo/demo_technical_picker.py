@@ -38,6 +38,15 @@ def setup_logging() -> None:
     )
 
 
+def _latest_indicators(info: SymbolInfo) -> dict:
+    """从 klines["4h"] 最后一行提取指标字典。无 4h 数据时返回空 dict。"""
+    df = info.klines.get("4h")
+    if df is None or len(df) == 0:
+        return {}
+    row = df.iloc[-1]
+    return {col: row.get(col) for col in row.index}
+
+
 def print_header(interval: str) -> None:
     """打印标题。"""
     print()
@@ -59,18 +68,20 @@ def print_header(interval: str) -> None:
 
 def print_cross_icon(info: SymbolInfo) -> str:
     """根据信号类型返回图标。"""
-    if info.cross_signal == CrossSignalType.GOLDEN:
+    cross = _latest_indicators(info).get("cross_signal")
+    if cross == CrossSignalType.GOLDEN.value:
         return "🔥"
-    elif info.cross_signal == CrossSignalType.DEAD:
+    elif cross == CrossSignalType.DEAD.value:
         return "🔻"
-    elif info.cross_signal == CrossSignalType.NEAR:
+    elif cross == CrossSignalType.NEAR.value:
         return "⚡"
     return "  "
 
 
 def print_sideways_icon(info: SymbolInfo) -> str:
     """横盘图标。"""
-    return "⏸️" if info.is_sideways_bottom else "  "
+    sideways = _latest_indicators(info).get("is_sideways_bottom")
+    return "⏸️" if sideways and bool(sideways) else "  "
 
 
 def delisting_label(info: SymbolInfo) -> str:
@@ -91,9 +102,9 @@ def print_results(results: list[SymbolInfo], duration: float, interval: str) -> 
         return
 
     # 统计各类信号
-    golden = sum(1 for r in notable if r.cross_signal == CrossSignalType.GOLDEN)
-    near = sum(1 for r in notable if r.cross_signal == CrossSignalType.NEAR)
-    sideways = sum(1 for r in notable if r.is_sideways_bottom)
+    golden = sum(1 for r in notable if _latest_indicators(r).get("cross_signal") == CrossSignalType.GOLDEN.value)
+    near = sum(1 for r in notable if _latest_indicators(r).get("cross_signal") == CrossSignalType.NEAR.value)
+    sideways = sum(1 for r in notable if _latest_indicators(r).get("is_sideways_bottom") and bool(_latest_indicators(r).get("is_sideways_bottom")))
     delisting = sum(1 for r in notable if is_delisting_soon(r))
 
     print(f"✅ 筛选完成，共 {len(notable)} 个代币符合展示条件")
@@ -108,7 +119,7 @@ def print_results(results: list[SymbolInfo], duration: float, interval: str) -> 
     # 打印表头
     header = (
         f"{'排名':<4} {'代币':<12} {'市值(万)':>12} "
-        f"{'昨日涨幅':>10} {'当前价':>10} {'SMA200':>10} {'距离%':>8} "
+        f"{'涨跌幅':>10} {'当前价':>10} {'SMA200':>10} {'距离%':>8} "
         f"{'波动%':>7} {'突破':<5} {'横盘':<5} {'下架':<8}"
     )
     print(header)
@@ -118,19 +129,24 @@ def print_results(results: list[SymbolInfo], duration: float, interval: str) -> 
         market_cap_wan = info.market_cap / 10000
         cross_icon = print_cross_icon(info)
         sideways_icon = print_sideways_icon(info)
+        ind = _latest_indicators(info)
 
         # 格式化距离均线百分比
-        dist_str = f"{info.price_vs_sma200_percent:+.2f}%" if info.price_vs_sma200_percent else "N/A"
-        vol_str = f"{info.volatility_10:.1f}%" if info.volatility_10 else "N/A"
-        price_str = f"{info.yesterday_close:.4f}"
+        price_vs_sma = ind.get("price_vs_sma200_percent")
+        dist_str = f"{price_vs_sma:+.2f}%" if price_vs_sma else "N/A"
+        vol_10 = ind.get("volatility_10")
+        vol_str = f"{vol_10:.1f}%" if vol_10 else "N/A"
+        price_str = f"{info.price:.4f}"
+        sma = ind.get("sma_200")
+        sma_str = f"{sma}" if sma else "N/A"
 
         print(
             f"{i:<4} "
             f"{info.base_asset:<12} "
             f"{market_cap_wan:>10,.1f}万 "
-            f"{info.yesterday_change_percent:>+9.2f}% "
+            f"{info.price_change_pct_24h:>+9.2f}% "
             f"{price_str:>10} "
-            f"{info.sma_200 or 'N/A':>10} "
+            f"{sma_str:>10} "
             f"{dist_str:>8} "
             f"{vol_str:>7} "
             f"{cross_icon:<5} "

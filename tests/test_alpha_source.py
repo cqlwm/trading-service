@@ -1,11 +1,11 @@
 """测试 AlphaTokenSource（TDD 红阶段）。
 
-AlphaTokenSource 是从 SimpleAlphaSymbolPicker 瘦身而来的数据源：
-只做基础筛选（市值<5000万 + 合约可交易 + 昨日阳线），不做技术分析。
+AlphaTokenSource 是纯数据源：只做候选集构建（Alpha 代币 + 市值门槛 + 合约可交易），
+不拉 K 线、不做阳线过滤。交易筛选由独立的 ISymbolFilter 完成。
 
 关键断言：
-1. 输出的 SymbolInfo 技术字段全为默认值（None/False）——证明技术分析已剥离
-2. 基础筛选逻辑正确：市值超限/不可交易/昨日阴线 -> 被过滤
+1. 输出的 SymbolInfo klines 为空 dict -- 证明 source 不做技术分析
+2. 基础筛选逻辑正确：市值超限/不可交易 -> 被过滤
 3. 实现 ISymbolSource
 
 使用 FakeClient + 构造内存数据，零网络。
@@ -19,7 +19,6 @@ import pytest
 from trading_service.clients.binance_client import (
     BinanceAlphaToken,
     BinanceFutureExchangeInfo,
-    BinanceFutureKline,
     BinanceFutureSymbol,
 )
 from trading_service.pickers.pipeline import ISymbolSource
@@ -60,30 +59,16 @@ def make_symbol_info_row(
     )
 
 
-def make_kline(open_p: float, close_p: float) -> BinanceFutureKline:
-    """构造一根日 K 线（阳线: close>=open）。"""
-    high = max(open_p, close_p)
-    low = min(open_p, close_p)
-    return BinanceFutureKline(
-        open_time=0, open_price=str(open_p), high_price=str(high),
-        low_price=str(low), close_price=str(close_p), volume="100",
-        close_time=0, quote_volume="0", trade_count=0,
-        taker_buy_base_volume="0", taker_buy_quote_volume="0", ignore="0",
-    )
-
-
 class FakeAlphaClient:
-    """最小化 client：实现 AlphaTokenSource 用到的三个方法。"""
+    """最小化 client：实现 AlphaTokenSource 用到的两个方法。"""
 
     def __init__(
         self,
         alpha_tokens: list[BinanceAlphaToken],
         symbols: list[BinanceFutureSymbol],
-        klines_by_symbol: dict[str, list[BinanceFutureKline]] | None = None,
     ) -> None:
         self._alpha_tokens = alpha_tokens
         self._symbols = symbols
-        self._klines = klines_by_symbol or {}
 
     def get_alpha_tokens(self) -> list[BinanceAlphaToken]:
         return self._alpha_tokens
@@ -93,21 +78,6 @@ class FakeAlphaClient:
             exchangeFilters=[], rateLimits=[], serverTime=0,
             assets=[], symbols=self._symbols, timezone="UTC",
         )
-
-    def get_future_klines(
-        self, symbol: str, interval: str, limit: int = 500,
-    ) -> list[BinanceFutureKline]:
-        return self._klines.get(symbol, [])
-
-
-# 用于检查阳线：source 取 klines_1d[-2] 作为"昨日K线"。
-# 列表为 [yesterday, today]；[-2] 即 yesterday，需为阳线(close>=open)。
-BULLISH_KLINES = [make_kline(10, 12), make_kline(12, 11)]   # [-2] 阳线(close12>=open10)
-BEARISH_KLINES = [make_kline(12, 10), make_kline(10, 11)]   # [-2] 阴线(close10<open12)
-
-
-def _klines_for(status: str) -> list[BinanceFutureKline]:
-    return BULLISH_KLINES if status == "bull" else BEARISH_KLINES
 
 
 class TestAlphaSourceInterface:
@@ -137,12 +107,11 @@ class TestAlphaSourceFiltering:
     """基础筛选逻辑测试。"""
 
     @pytest.mark.asyncio
-    async def test_filters_below_cap_tradable_bullish(self) -> None:
-        """正常路径：市值<5000万 + 可交易 + 昨日阳线 -> 保留。"""
+    async def test_filters_below_cap_tradable(self) -> None:
+        """正常路径：市值<5000万 + 可交易 -> 保留。"""
         client = FakeAlphaClient(
             alpha_tokens=[make_alpha_token("ABC", 10_000_000)],
             symbols=[make_symbol_info_row("ABC")],
-            klines_by_symbol={"ABCUSDT": BULLISH_KLINES},
         )
         source = AlphaTokenSource(client=client)
         result = await source.fetch()
@@ -160,9 +129,6 @@ class TestAlphaSourceFiltering:
                 make_alpha_token("BIG", 60_000_000),  # 超 5000 万
             ],
             symbols=[make_symbol_info_row("SMALL"), make_symbol_info_row("BIG")],
-            klines_by_symbol={
-                "SMALLUSDT": BULLISH_KLINES, "BIGUSDT": BULLISH_KLINES,
-            },
         )
         source = AlphaTokenSource(client=client)
         result = await source.fetch()
@@ -174,23 +140,10 @@ class TestAlphaSourceFiltering:
         client = FakeAlphaClient(
             alpha_tokens=[make_alpha_token("NOCONTRACT", 10_000_000)],
             symbols=[],  # 没有可交易合约
-            klines_by_symbol={},
         )
         source = AlphaTokenSource(client=client)
         result = await source.fetch()
         assert result == []
-
-    @pytest.mark.asyncio
-    async def test_drops_bearish_yesterday(self) -> None:
-        """边界：昨日阴线 -> 过滤掉。"""
-        client = FakeAlphaClient(
-            alpha_tokens=[make_alpha_token("BEAR", 10_000_000)],
-            symbols=[make_symbol_info_row("BEAR")],
-            klines_by_symbol={"BEARUSDT": BEARISH_KLINES},
-        )
-        source = AlphaTokenSource(client=client)
-        result = await source.fetch()
-        assert result == [], "昨日阴线应被过滤"
 
     @pytest.mark.asyncio
     async def test_sorts_by_market_cap_ascending(self) -> None:
@@ -206,11 +159,6 @@ class TestAlphaSourceFiltering:
                 make_symbol_info_row("SMALL"),
                 make_symbol_info_row("LARGE"),
             ],
-            klines_by_symbol={
-                "MIDUSDT": BULLISH_KLINES,
-                "SMALLUSDT": BULLISH_KLINES,
-                "LARGEUSDT": BULLISH_KLINES,
-            },
         )
         source = AlphaTokenSource(client=client)
         result = await source.fetch()
@@ -220,27 +168,21 @@ class TestAlphaSourceFiltering:
 
 
 class TestAlphaSourceTechnicalFieldsDefault:
-    """关键不变量：source 输出的技术字段全为默认值（技术分析已剥离）。"""
+    """关键不变量：source 输出的 klines 为空 dict（source 不拉 K 线）。"""
 
     @pytest.mark.asyncio
     async def test_technical_fields_all_default(self) -> None:
-        """纯增强不变量：source 不填任何技术字段，全为 None/False。"""
+        """纯增强不变量：source 不构建 klines DataFrame，klines 为空 dict。"""
         client = FakeAlphaClient(
             alpha_tokens=[make_alpha_token("ABC", 10_000_000)],
             symbols=[make_symbol_info_row("ABC")],
-            klines_by_symbol={"ABCUSDT": BULLISH_KLINES},
         )
         source = AlphaTokenSource(client=client)
         result = await source.fetch()
 
         assert len(result) == 1
         info = result[0]
-        assert info.sma_200 is None
-        assert info.price_vs_sma200_percent is None
-        assert info.cross_signal is None
-        assert info.cross_ago is None
-        assert info.is_sideways_bottom is False
-        assert info.volatility_10 is None
+        assert info.klines == {}, "AlphaTokenSource 不应构建 klines DataFrame"
 
 
 class TestAlphaSourceEmpty:
@@ -264,7 +206,6 @@ class TestAlphaSourceCarriesDeliveryDate:
         client = FakeAlphaClient(
             alpha_tokens=[make_alpha_token("ABC", 10_000_000)],
             symbols=[make_symbol_info_row("ABC", delivery_date=4133404800000)],
-            klines_by_symbol={"ABCUSDT": BULLISH_KLINES},
         )
         source = AlphaTokenSource(client=client)
         result = await source.fetch()
@@ -279,7 +220,6 @@ class TestAlphaSourceCarriesDeliveryDate:
         client = FakeAlphaClient(
             alpha_tokens=[make_alpha_token("DLST", 10_000_000)],
             symbols=[make_symbol_info_row("DLST", delivery_date=delisting_date)],
-            klines_by_symbol={"DLSTUSDT": BULLISH_KLINES},
         )
         source = AlphaTokenSource(client=client)
         result = await source.fetch()
@@ -299,10 +239,6 @@ class TestAlphaSourceCarriesDeliveryDate:
                 make_symbol_info_row("NORM", delivery_date=4133404800000),
                 make_symbol_info_row("DLST", delivery_date=1782637200000),
             ],
-            klines_by_symbol={
-                "NORMUSDT": BULLISH_KLINES,
-                "DLSTUSDT": BULLISH_KLINES,
-            },
         )
         source = AlphaTokenSource(client=client)
         result = await source.fetch()

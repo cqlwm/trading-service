@@ -1,7 +1,7 @@
 """测试 MicroCapStrategy 选币 + 信号检测 + 信号驱动入场。
 
 策略流程（重构后）：
-1. 选币：symbol_picker.pick() 获取候选币（已含技术分析字段）
+1. 选币：symbol_picker.pick() 获取候选币（已含 klines DataFrame）
 2. 信号检测：检测器接收候选币，产出 golden_cross 信号落盘
 3. 决策：从 DB 拉取金叉信号，排除已持仓 symbol 后开仓
 """
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
+import pandas as pd
 import pytest
 
 from trading_service.exchange import MockExchange
@@ -17,8 +18,25 @@ from trading_service.strategies.micro_cap import MicroCapConfig, MicroCapStrateg
 from trading_service.types import CrossSignalType, TradeDirection
 
 
+def _make_klines_df(
+    cross_signal: str | None = None,
+    sma_200: float | None = None,
+    price_vs_sma200: float | None = None,
+) -> pd.DataFrame:
+    """构建含指标列的 DataFrame（模拟 TechnicalAnalysisFilter 的输出）。"""
+    return pd.DataFrame([{
+        "datetime": 0,
+        "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0,
+        "sma_200": sma_200,
+        "cross_signal": cross_signal,
+        "price_vs_sma200_percent": price_vs_sma200,
+        "volatility_10": 0.0,
+        "is_sideways_bottom": False,
+    }])
+
+
 class FakeMicroCapPicker(ISymbolPicker):
-    """内存版选币器 - 返回带技术分析字段的 SymbolInfo。"""
+    """内存版选币器 - 返回带 klines DataFrame 的 SymbolInfo。"""
 
     def __init__(self, symbols: list[SymbolInfo]) -> None:
         self.symbols = symbols
@@ -34,13 +52,14 @@ def make_info(
     sma_200: float | None = None,
     price_vs_sma200_percent: float | None = None,
 ) -> SymbolInfo:
-    return SymbolInfo(
-        symbol=symbol,
-        cross_signal=cross_signal,
-        is_sideways_bottom=is_sideways_bottom,
+    cross_str = cross_signal.value if cross_signal else None
+    info = SymbolInfo(symbol=symbol)
+    info.klines["4h"] = _make_klines_df(
+        cross_signal=cross_str,
         sma_200=sma_200,
-        price_vs_sma200_percent=price_vs_sma200_percent,
+        price_vs_sma200=price_vs_sma200_percent,
     )
+    return info
 
 
 @pytest.fixture

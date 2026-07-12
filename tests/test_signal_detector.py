@@ -2,10 +2,13 @@
 
 验证检测器作为策略组件的信号检测、落盘功能。
 检测器接收候选币列表（SymbolInfo），产出信号。
+指标从 klines DataFrame 最后一行读取。
 """
 from __future__ import annotations
 
 import pytest
+
+import pandas as pd
 
 from trading_service.detectors.technical import TechnicalSignalDetector
 from trading_service.exchange import MockExchange
@@ -19,6 +22,25 @@ def exchange() -> MockExchange:
     return MockExchange(InMemoryTradingRepository())
 
 
+def make_klines_df(
+    cross_signal: str | None = None,
+    price_vs_sma200: float | None = None,
+    sma_200: float | None = None,
+    is_sideways: bool = False,
+    volatility: float | None = None,
+) -> pd.DataFrame:
+    """构建一个含指标列的 DataFrame（模拟 TechnicalAnalysisFilter 的输出）。"""
+    return pd.DataFrame([{
+        "datetime": 0,
+        "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0,
+        "sma_200": sma_200,
+        "cross_signal": cross_signal,
+        "price_vs_sma200_percent": price_vs_sma200,
+        "volatility_10": volatility,
+        "is_sideways_bottom": is_sideways,
+    }])
+
+
 def make_info(
     symbol: str,
     cross_signal: CrossSignalType | None = None,
@@ -27,15 +49,17 @@ def make_info(
     price_vs_sma200_percent: float | None = None,
     volatility_10: float | None = None,
 ) -> SymbolInfo:
-    """构造一个带技术分析字段的 SymbolInfo。"""
-    return SymbolInfo(
-        symbol=symbol,
-        cross_signal=cross_signal,
-        is_sideways_bottom=is_sideways_bottom,
+    """构造一个带 klines["4h"] DataFrame 的 SymbolInfo。"""
+    cross_str = cross_signal.value if cross_signal else None
+    info = SymbolInfo(symbol=symbol)
+    info.klines["4h"] = make_klines_df(
+        cross_signal=cross_str,
+        price_vs_sma200=price_vs_sma200_percent,
         sma_200=sma_200,
-        price_vs_sma200_percent=price_vs_sma200_percent,
-        volatility_10=volatility_10,
+        is_sideways=is_sideways_bottom,
+        volatility=volatility_10,
     )
+    return info
 
 
 class TestTechnicalSignalDetector:
@@ -178,26 +202,6 @@ class TestDetectorAsStrategyComponent:
         assert len(saved) == 0
 
 
-def make_klines_df(
-    cross_signal: str | None = None,
-    price_vs_sma200: float | None = None,
-    sma_200: float | None = None,
-    is_sideways: bool = False,
-    volatility: float | None = None,
-):
-    """构建一个含指标列的 DataFrame（模拟 TechnicalAnalysisFilter 的输出）。"""
-    import pandas as pd
-    return pd.DataFrame([{
-        "datetime": 0,
-        "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0,
-        "sma_200": sma_200,
-        "cross_signal": cross_signal,
-        "price_vs_sma200_percent": price_vs_sma200,
-        "volatility_10": volatility,
-        "is_sideways_bottom": is_sideways,
-    }])
-
-
 class TestDetectorDataFrameRead:
     """测试检测器从 DataFrame 读取指标。"""
 
@@ -206,7 +210,7 @@ class TestDetectorDataFrameRead:
         """从 DataFrame 读取金叉信号。"""
         detector = TechnicalSignalDetector(repo=exchange.db)
         info = SymbolInfo(symbol="BTCUSDT")
-        info.klines = make_klines_df(cross_signal="golden", sma_200=50000, price_vs_sma200=2.5)
+        info.klines["4h"] = make_klines_df(cross_signal="golden", sma_200=50000, price_vs_sma200=2.5)
 
         results = await detector.detect([info])
 
@@ -219,7 +223,7 @@ class TestDetectorDataFrameRead:
         """从 DataFrame 读取死叉信号。"""
         detector = TechnicalSignalDetector(repo=exchange.db)
         info = SymbolInfo(symbol="ETHUSDT")
-        info.klines = make_klines_df(cross_signal="dead", sma_200=3000, price_vs_sma200=-3.0)
+        info.klines["4h"] = make_klines_df(cross_signal="dead", sma_200=3000, price_vs_sma200=-3.0)
 
         results = await detector.detect([info])
 
@@ -231,7 +235,7 @@ class TestDetectorDataFrameRead:
         """从 DataFrame 读取横盘信号。"""
         detector = TechnicalSignalDetector(repo=exchange.db)
         info = SymbolInfo(symbol="SOLUSDT")
-        info.klines = make_klines_df(is_sideways=True, volatility=5.0)
+        info.klines["4h"] = make_klines_df(is_sideways=True, volatility=5.0)
 
         results = await detector.detect([info])
 
@@ -239,24 +243,11 @@ class TestDetectorDataFrameRead:
         assert results[0].signal_type == "sideways_bottom"
 
     @pytest.mark.asyncio
-    async def test_dataframe_takes_priority_over_old_fields(self, exchange: MockExchange) -> None:
-        """DataFrame 有值时优先于旧字段。"""
+    async def test_no_klines_returns_empty(self, exchange: MockExchange) -> None:
+        """无 klines 数据的候选币不产出信号。"""
         detector = TechnicalSignalDetector(repo=exchange.db)
-        info = SymbolInfo(symbol="BTCUSDT", cross_signal=CrossSignalType.DEAD)  # 旧字段是死叉
-        info.klines = make_klines_df(cross_signal="golden")  # DataFrame 是金叉
+        info = SymbolInfo(symbol="BTCUSDT")  # klines={}
 
         results = await detector.detect([info])
 
-        assert len(results) == 1
-        assert results[0].signal_type == "golden_cross", "应以 DataFrame 为准"
-
-    @pytest.mark.asyncio
-    async def test_fallback_to_old_fields_when_no_dataframe(self, exchange: MockExchange) -> None:
-        """无 DataFrame 时回退到旧字段。"""
-        detector = TechnicalSignalDetector(repo=exchange.db)
-        info = make_info("BTCUSDT", cross_signal=CrossSignalType.GOLDEN, sma_200=50000)
-
-        results = await detector.detect([info])
-
-        assert len(results) == 1
-        assert results[0].signal_type == "golden_cross"
+        assert len(results) == 0

@@ -1,7 +1,7 @@
 """测试 TechnicalAnalysisFilter（TDD 红阶段）。
 
-技术分析独立阶段：逐个拉K线 + 调 analyzer.detect_200sma_signal + 回填技术字段。
-关键不变量：纯增强——analyzer 返回 None 时 SymbolInfo 数量不减、技术字段保持默认。
+技术分析独立阶段：逐个拉K线 + 调 analyzer.detect_200sma_signal + 写入 klines DataFrame。
+关键不变量：纯增强--analyzer 返回 None 时 SymbolInfo 数量不减、DataFrame 不含信号列。
 
 测试覆盖：正常路径增强、纯增强不丢弃、边界（空/数据不足）、幂等。
 使用 FakeBinanceClient + 真 TechnicalAnalyzer，零网络。
@@ -62,6 +62,16 @@ def make_info(symbol: str) -> SymbolInfo:
     return SymbolInfo(symbol=symbol)
 
 
+def _latest_signal_col(info: SymbolInfo, col: str) -> object:
+    """从 klines["4h"] 最后一行读取信号列值。列不存在时返回 None。"""
+    df = info.klines.get("4h")
+    if df is None or len(df) == 0:
+        return None
+    if col not in df.columns:
+        return None
+    return df.iloc[-1][col]
+
+
 class TestTechnicalFilterInterface:
     """接口契约测试。"""
 
@@ -99,10 +109,12 @@ class TestTechnicalFilterEnrichment:
 
         assert len(result) == 1
         info = result[0]
-        assert info.cross_signal == CrossSignalType.GOLDEN, f"应回填 golden，实际 {info.cross_signal}"
-        assert info.sma_200 is not None, "sma_200 应已回填"
-        assert info.price_vs_sma200_percent is not None
-        assert info.volatility_10 is not None
+        assert "4h" in info.klines, "klines['4h'] 应已构建"
+        assert _latest_signal_col(info, "cross_signal") == CrossSignalType.GOLDEN.value, \
+            f"应写入 golden，实际 {_latest_signal_col(info, 'cross_signal')}"
+        assert _latest_signal_col(info, "sma_200") is not None, "sma_200 列应有值"
+        assert _latest_signal_col(info, "price_vs_sma200_percent") is not None
+        assert _latest_signal_col(info, "volatility_10") is not None
 
     @pytest.mark.asyncio
     async def test_fetches_correct_kline_interval_and_limit(self) -> None:
@@ -138,7 +150,7 @@ class TestTechnicalFilterPureEnrichment:
 
     @pytest.mark.asyncio
     async def test_fields_keep_default_when_signal_none(self) -> None:
-        """纯增强：信号为 None 时技术字段保持默认值（None/False）。"""
+        """纯增强：信号为 None 时 DataFrame 不含信号列。"""
         klines = make_flat_klines(200, 100.0)
         klines.extend(make_flat_klines(15, 120.0))  # 远离均线 -> None
 
@@ -149,10 +161,11 @@ class TestTechnicalFilterPureEnrichment:
 
         result = await f.apply([make_info("ABCUSDT")])
         info = result[0]
-        assert info.cross_signal is None
-        assert info.is_sideways_bottom is False
-        assert info.sma_200 is None
-        assert info.volatility_10 is None
+        assert "4h" in info.klines
+        df_4h = info.klines["4h"]
+        assert "cross_signal" not in df_4h.columns, "无信号时不应写入 cross_signal 列"
+        assert "is_sideways_bottom" not in df_4h.columns
+        assert "volatility_10" not in df_4h.columns
 
     @pytest.mark.asyncio
     async def test_mixed_signals_all_kept(self) -> None:
@@ -173,8 +186,8 @@ class TestTechnicalFilterPureEnrichment:
         result = await f.apply([make_info("GOLDUSDT"), make_info("FARUSDT")])
         assert len(result) == 2, "两个都应保留"
         by_sym = {i.symbol: i for i in result}
-        assert by_sym["GOLDUSDT"].cross_signal == CrossSignalType.GOLDEN
-        assert by_sym["FARUSDT"].cross_signal is None
+        assert _latest_signal_col(by_sym["GOLDUSDT"], "cross_signal") == CrossSignalType.GOLDEN.value
+        assert _latest_signal_col(by_sym["FARUSDT"], "cross_signal") is None
 
 
 class TestTechnicalFilterBoundaries:
@@ -191,24 +204,23 @@ class TestTechnicalFilterBoundaries:
 
     @pytest.mark.asyncio
     async def test_insufficient_klines_keeps_defaults(self) -> None:
-        """边界：K 线不足 201 根 -> analyzer 返回 None -> 字段保持默认。"""
+        """边界：K 线不足 201 根 -> analyzer 返回 None -> 不构建 klines["4h"]。"""
         client = FakeKlineClient({"ABCUSDT": make_flat_klines(200, 100.0)})
         f = TechnicalAnalysisFilter(analyzer=TechnicalAnalyzer(), client=client)
 
         result = await f.apply([make_info("ABCUSDT")])
         assert len(result) == 1
-        assert result[0].cross_signal is None, "K线不足应保持默认"
-        assert result[0].sma_200 is None
+        assert "4h" not in result[0].klines, "K线不足不应构建 klines['4h']"
 
     @pytest.mark.asyncio
     async def test_no_klines_for_symbol_keeps_defaults(self) -> None:
-        """边界：client 返回空 K 线 -> 字段保持默认，不报错。"""
+        """边界：client 返回空 K 线 -> 不构建 klines["4h"]，不报错。"""
         client = FakeKlineClient({"ABCUSDT": []})
         f = TechnicalAnalysisFilter(analyzer=TechnicalAnalyzer(), client=client)
 
         result = await f.apply([make_info("ABCUSDT")])
         assert len(result) == 1
-        assert result[0].cross_signal is None
+        assert "4h" not in result[0].klines
 
 
 class TestTechnicalFilterIdempotency:
@@ -216,7 +228,7 @@ class TestTechnicalFilterIdempotency:
 
     @pytest.mark.asyncio
     async def test_two_applies_consistent(self) -> None:
-        """幂等性：同一输入两次 apply，回填字段一致（用新输入对象）。"""
+        """幂等性：同一输入两次 apply，DataFrame 信号列一致（用新输入对象）。"""
         golden_klines = make_flat_klines(200, 50.0)
         golden_klines.append(make_kline(50, 50, 50, 50))
         golden_klines.append(make_kline(48, 70, 48, 70))
@@ -226,5 +238,6 @@ class TestTechnicalFilterIdempotency:
 
         r1 = await f.apply([make_info("ABCUSDT")])
         r2 = await f.apply([make_info("ABCUSDT")])
-        assert r1[0].cross_signal == r2[0].cross_signal == CrossSignalType.GOLDEN
-        assert r1[0].sma_200 == r2[0].sma_200
+        assert _latest_signal_col(r1[0], "cross_signal") == CrossSignalType.GOLDEN.value
+        assert _latest_signal_col(r2[0], "cross_signal") == CrossSignalType.GOLDEN.value
+        assert _latest_signal_col(r1[0], "sma_200") == _latest_signal_col(r2[0], "sma_200")

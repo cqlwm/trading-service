@@ -51,29 +51,28 @@ def print_results(results: list[SymbolInfo], duration: float) -> None:
     # 打印表头
     header = (
         f"{'排名':<4} {'代币':<12} {'合约':<15} {'市值(万)':>12} "
-        f"{'昨日涨幅':>10} {'开盘价':>10} {'收盘价':>10} {'涨跌':<6}"
+        f"{'价格':>10} {'涨跌幅':>10} {'涨跌':<6}"
     )
     print(header)
     print("-" * 85)
 
     for i, info in enumerate(results, 1):
-        up_down = "📈" if info.yesterday_change_percent >= 0 else "📉"
+        up_down = "📈" if info.price_change_pct_24h >= 0 else "📉"
         market_cap_wan = info.market_cap / 10000
         print(
             f"{i:<4} "
             f"{info.base_asset:<12} "
             f"{info.symbol:<15} "
             f"{market_cap_wan:>10,.1f}万 "
-            f"{info.yesterday_change_percent:>+9.2f}% "
-            f"{info.yesterday_open:>10.4f} "
-            f"{info.yesterday_close:>10.4f} "
+            f"{info.price:>10.4f} "
+            f"{info.price_change_pct_24h:>+9.2f}% "
             f"{up_down:<6}"
         )
 
     print()
     print("=" * 80)
-    print(f"统计: 共 {len(results)} 个代币，平均涨幅: "
-          f"{sum(r.yesterday_change_percent for r in results) / len(results):.2f}%")
+    print(f"统计: 共 {len(results)} 个代币，平均涨跌幅: "
+          f"{sum(r.price_change_pct_24h for r in results) / len(results):.2f}%")
 
 
 async def main() -> None:

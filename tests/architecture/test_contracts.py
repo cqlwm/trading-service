@@ -155,6 +155,8 @@ class TestModuleOrganization:
             "TechnicalAnalyzer",
             "TechnicalAnalysisFilter",
             "CrossSignal",
+            # 过滤器
+            "BullishKlineFilter",
         ]
 
         for name in expected:

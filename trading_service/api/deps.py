@@ -8,6 +8,7 @@ from trading_service.config import settings
 from trading_service.exchange import MockExchange
 from trading_service.pickers import (
     AlphaTokenSource,
+    BullishKlineFilter,
     SelectionPipeline,
     ShortSignalFilter,
     StaticListSymbolPicker,
@@ -39,13 +40,14 @@ _martingale_strategy = MartingaleStrategy(
 # 微市值：选币（AlphaTokenSource）-> 技术分析增强（TechnicalAnalysisFilter）-> 策略
 _micro_cap_client = BinanceClient(timeout=30)
 # 技术信号检测器（作为微市值策略的组件，接收策略选好的候选币进行检测）
-_technical_signal_detector = TechnicalSignalDetector(repo=_trading_store)
+_technical_signal_detector = TechnicalSignalDetector(repo=_trading_store, client=_micro_cap_client)
 _micro_cap_strategy = MicroCapStrategy(
     exchange=_exchange,
     config=MicroCapConfig(),
     symbol_picker=SelectionPipeline(
         source=AlphaTokenSource(client=_micro_cap_client),
         filters=[
+            BullishKlineFilter(client=_micro_cap_client, interval="1d", limit=5),
             TechnicalAnalysisFilter(
                 analyzer=TechnicalAnalyzer(),
                 client=_micro_cap_client,
