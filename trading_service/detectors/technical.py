@@ -1,20 +1,13 @@
 """技术分析信号检测器。
 
-扫描候选币种的技术指标，产出金叉/死叉/横盘底部等信号。
-这些信号可被策略消费（如微市值策略根据金叉开仓），
-也可不被消费（仅落盘供内容生成）。
+接收策略选好的候选币（已含技术分析字段），产出金叉/死叉/横盘信号。
+不再自己组装 SelectionPipeline，由策略传入候选币。
 """
 
 from __future__ import annotations
 
-from trading_service.clients import BinanceClient
 from trading_service.detectors.base import SignalDetector, SignalResult
-from trading_service.pickers import (
-    AlphaTokenSource,
-    SelectionPipeline,
-    TechnicalAnalysisFilter,
-    TechnicalAnalyzer,
-)
+from trading_service.pickers import SymbolInfo
 from trading_service.repository import TradingRepository
 from trading_service.types import CrossSignalType
 
@@ -23,26 +16,17 @@ class TechnicalSignalDetector(SignalDetector):
     """技术分析信号检测器。"""
 
     name = "technical_signal"
-    cron = "0 */5 * * * *"  # 6字段：秒 分 时 日 月 周 = 每5分钟
 
-    def __init__(self, repo: TradingRepository, client: BinanceClient) -> None:
+    def __init__(self, repo: TradingRepository) -> None:
         super().__init__(repo)
-        self._picker = SelectionPipeline(
-            source=AlphaTokenSource(client=client),
-            filters=[
-                TechnicalAnalysisFilter(
-                    analyzer=TechnicalAnalyzer(),
-                    client=client,
-                    kline_interval="4h",
-                ),
-            ],
-        )
 
-    async def detect(self) -> list[SignalResult]:
-        """扫描候选币种，产出技术分析信号。"""
-        infos = await self._picker.pick()
+    async def detect(self, candidates: list[SymbolInfo]) -> list[SignalResult]:
+        """对候选币进行技术分析信号检测。
+
+        候选币应已由 TechnicalAnalysisFilter 回填 cross_signal 等技术字段。
+        """
         results: list[SignalResult] = []
-        for info in infos:
+        for info in candidates:
             if info.cross_signal == CrossSignalType.GOLDEN:
                 results.append(SignalResult(
                     symbol=info.symbol,

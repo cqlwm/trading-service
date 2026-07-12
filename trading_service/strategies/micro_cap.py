@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from trading_service.exchange import MockExchange
 from trading_service.pickers import ISymbolPicker
 from trading_service.strategies.base import Strategy, StrategyAction, StrategyConfig
+from trading_service.detectors.base import SignalDetector
 from trading_service.types import TradeDirection
 
 
@@ -36,15 +37,17 @@ class MicroCapStrategy(Strategy):
         exchange: MockExchange,
         config: MicroCapConfig,
         symbol_picker: ISymbolPicker,
+        signal_detectors: list[SignalDetector] | None = None,
     ) -> None:
-        super().__init__(exchange, config, symbol_picker)
+        super().__init__(exchange, config, symbol_picker, signal_detectors)
         self.config: MicroCapConfig = config
 
     async def execute(self, execution_id: str = "") -> list[StrategyAction]:
-        """执行策略 - 基于信号驱动入场。
+        """执行策略 - 选币 + 信号检测 + 信号驱动入场。
 
-        从数据库拉取金叉信号，排除已持仓 symbol 后开仓。
-        返回执行的动作列表。
+        1. 选币：symbol_picker.pick() 获取候选币
+        2. 信号检测：检测器产出信号落盘
+        3. 决策：从 DB 拉取金叉信号，排除已持仓 symbol 后开仓
         """
         actions: list[StrategyAction] = []
         positions = self.exchange.get_positions(tag="micro_cap", status="open")
@@ -53,6 +56,11 @@ class MicroCapStrategy(Strategy):
         if current_count >= self.config.max_positions:
             return actions
 
+        # 1. 选币
+        candidates = await self.symbol_picker.pick()
+        # 2. 信号检测（落盘到 trading_signals）
+        await self.run_detectors(candidates, execution_id)
+        # 3. 从 DB 拉取金叉信号决策
         actions.extend(await self._open_from_signals(current_count, execution_id))
         return actions
 

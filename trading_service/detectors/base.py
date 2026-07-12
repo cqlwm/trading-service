@@ -1,8 +1,8 @@
 """信号检测器基类。
 
-信号检测器与策略平行，由调度器定时调度。
-产出信号落盘到 trading_signals 表。
-信号可被策略消费（驱动交易），也可不被消费（仅用于内容生成）。
+信号检测器是策略的组件，接收策略选好的候选币列表进行信号检测。
+检测器不负责选币，由策略通过 symbol_picker 选币后传入。
+产出的信号落盘到 trading_signals 表。
 """
 
 from __future__ import annotations
@@ -11,12 +11,13 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
+from trading_service.pickers import SymbolInfo
 from trading_service.repository import TradingRepository
 
 
 @dataclass
 class SignalResult:
-    """信号检测器产出的单条信号（内存对象，由调度器转换为 SignalRecord 落盘）。"""
+    """信号检测器产出的单条信号（内存对象，由策略落盘为 SignalRecord）。"""
 
     symbol: str
     signal_type: str           # 如 "golden_cross", "consecutive_rise", "volume_surge"
@@ -27,22 +28,22 @@ class SignalResult:
 
 
 class SignalDetector(ABC):
-    """信号检测器基类 -- 与策略平行，由调度器定时调度。
+    """信号检测器 -- 策略组件，接收候选币列表进行信号检测。
 
-    产出信号落盘到 trading_signals 表。
+    检测器不负责选币，由策略通过 symbol_picker 选币后传入。
+    产出的信号落盘到 trading_signals 表。
     信号可被策略消费（驱动交易），也可不被消费（仅用于内容生成）。
     """
 
-    name: str = ""   # 检测器标识（用于调度注册）
-    cron: str = ""   # cron 表达式（空=不参与定时调度）
+    name: str = ""  # 检测器标识
 
     def __init__(self, repo: TradingRepository) -> None:
         self._repo = repo
 
     @abstractmethod
-    async def detect(self) -> list[SignalResult]:
-        """扫描市场，产出信号列表。"""
+    async def detect(self, candidates: list[SymbolInfo]) -> list[SignalResult]:
+        """对候选币列表进行信号检测，产出信号列表。"""
 
     def get_status(self) -> dict[str, Any]:
         """获取检测器状态。"""
-        return {"name": self.name, "cron": self.cron}
+        return {"name": self.name}

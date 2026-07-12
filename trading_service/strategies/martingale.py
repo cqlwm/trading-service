@@ -4,6 +4,7 @@ from typing import Any
 from trading_service.exchange import MockExchange, Position
 from trading_service.strategies.base import Strategy, StrategyAction, StrategyConfig
 from trading_service.pickers import ISymbolPicker
+from trading_service.detectors.base import SignalDetector
 from trading_service.types import OrderType, TradeDirection
 
 
@@ -34,8 +35,9 @@ class MartingaleStrategy(Strategy):
         exchange: MockExchange,
         config: MartingaleConfig,
         symbol_picker: ISymbolPicker,
+        signal_detectors: list[SignalDetector] | None = None,
     ) -> None:
-        super().__init__(exchange, config, symbol_picker)
+        super().__init__(exchange, config, symbol_picker, signal_detectors)
         self.config: MartingaleConfig = config
 
     async def execute(self, execution_id: str = "") -> list[StrategyAction]:
@@ -120,6 +122,8 @@ class MartingaleStrategy(Strategy):
         """开新仓位逻辑。"""
         actions: list[StrategyAction] = []
         symbol_infos = await self.symbol_picker.pick()
+        # 运行信号检测器（如果有），信号落盘供其他策略或内容生成使用
+        await self.run_detectors(symbol_infos, execution_id)
         positions = self.exchange.get_positions(tag=self.name, status="open")
         occupied_symbols = {p.symbol for p in positions}
         available_infos = [s for s in symbol_infos if s.symbol not in occupied_symbols]

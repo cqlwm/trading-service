@@ -1,13 +1,9 @@
-"""测试 MicroCapStrategy 信号驱动入场逻辑。
+"""测试 MicroCapStrategy 选币 + 信号检测 + 信号驱动入场。
 
-策略逻辑（重构后）：
-1. 从数据库拉取 golden_cross 信号（由信号检测器产出）
-2. 排除已持仓 symbol
-3. 每笔买入 position_size_usdt（默认 10 USDT）
-4. 动作记录关联 signal_ids
-
-测试覆盖：正常路径、边界、隔离、空值、signal_ids 关联。
-全部使用内存实现，零网络、毫秒级运行。
+策略流程（重构后）：
+1. 选币：symbol_picker.pick() 获取候选币（已含技术分析字段）
+2. 信号检测：检测器接收候选币，产出 golden_cross 信号落盘
+3. 决策：从 DB 拉取金叉信号，排除已持仓 symbol 后开仓
 """
 from __future__ import annotations
 
@@ -17,59 +13,68 @@ import pytest
 
 from trading_service.exchange import MockExchange
 from trading_service.pickers import ISymbolPicker, SymbolInfo
-from trading_service.repository import SignalRecord
 from trading_service.strategies.micro_cap import MicroCapConfig, MicroCapStrategy
-from trading_service.types import TradeDirection
+from trading_service.types import CrossSignalType, TradeDirection
 
 
 class FakeMicroCapPicker(ISymbolPicker):
-    """内存版选币器 - micro_cap 策略不再使用 picker 做信号过滤，但基类仍需要。"""
+    """内存版选币器 - 返回带技术分析字段的 SymbolInfo。"""
+
+    def __init__(self, symbols: list[SymbolInfo]) -> None:
+        self.symbols = symbols
 
     async def pick(self) -> list[SymbolInfo]:
-        return []
+        return list(self.symbols)
 
 
-def make_signal(
+def make_info(
     symbol: str,
-    signal_type: str = "golden_cross",
-    direction: str = "bullish",
-    severity: int = 3,
-) -> SignalRecord:
-    """构造一条信号记录。"""
-    return SignalRecord(
-        id=f"sig_{symbol}",
+    cross_signal: CrossSignalType | None = None,
+    is_sideways_bottom: bool = False,
+    sma_200: float | None = None,
+    price_vs_sma200_percent: float | None = None,
+) -> SymbolInfo:
+    return SymbolInfo(
         symbol=symbol,
-        signal_type=signal_type,
-        direction=direction,
-        severity=severity,
-        description=f"{symbol} 金叉信号",
+        cross_signal=cross_signal,
+        is_sideways_bottom=is_sideways_bottom,
+        sma_200=sma_200,
+        price_vs_sma200_percent=price_vs_sma200_percent,
     )
 
 
 @pytest.fixture
 def exchange() -> MockExchange:
     from tests.conftest import InMemoryTradingRepository
-
-    repo = InMemoryTradingRepository()
-    return MockExchange(repo)
+    return MockExchange(InMemoryTradingRepository())
 
 
-@pytest.fixture
-def strategy(exchange: MockExchange) -> MicroCapStrategy:
-    """创建 micro_cap 策略实例。"""
-    config = MicroCapConfig(max_positions=5, position_size_usdt=10.0)
-    return MicroCapStrategy(exchange, config, FakeMicroCapPicker())
+def make_strategy(
+    exchange: MockExchange,
+    picker_symbols: list[SymbolInfo] | None = None,
+    max_positions: int = 5,
+) -> MicroCapStrategy:
+    """创建带技术信号检测器的微市值策略。"""
+    from trading_service.detectors.technical import TechnicalSignalDetector
+
+    config = MicroCapConfig(max_positions=max_positions, position_size_usdt=10.0)
+    picker = FakeMicroCapPicker(picker_symbols or [])
+    detector = TechnicalSignalDetector(repo=exchange.db)
+    return MicroCapStrategy(
+        exchange, config, picker,
+        signal_detectors=[detector],
+    )
 
 
-class TestMicroCapSignalConsumption:
-    """测试信号驱动入场。"""
+class TestMicroCapSignalDriven:
+    """测试选币 + 信号检测 + 信号驱动入场。"""
 
     @pytest.mark.asyncio
-    async def test_opens_position_on_golden_cross_signal(
-        self, exchange: MockExchange, strategy: MicroCapStrategy
-    ) -> None:
-        """正常路径：DB 中有金叉信号 -> 开仓。"""
-        exchange.db.save_signal(make_signal("ABCUSDT"))
+    async def test_golden_cross_signal_triggers_open(self, exchange: MockExchange) -> None:
+        """正常路径：选币 -> 金叉信号落盘 -> 从 DB 拉取信号开仓。"""
+        strategy = make_strategy(exchange, [
+            make_info("ABCUSDT", cross_signal=CrossSignalType.GOLDEN, sma_200=1.0, price_vs_sma200_percent=2.0),
+        ])
         exchange.fetch_prices = AsyncMock(return_value={"ABCUSDT": 1.0})  # type: ignore
 
         await strategy.execute()
@@ -81,35 +86,33 @@ class TestMicroCapSignalConsumption:
         assert positions[0].direction == TradeDirection.LONG
 
     @pytest.mark.asyncio
-    async def test_no_open_without_signals(
-        self, exchange: MockExchange, strategy: MicroCapStrategy
-    ) -> None:
-        """空值：DB 中无信号时不开仓。"""
+    async def test_no_golden_cross_no_open(self, exchange: MockExchange) -> None:
+        """候选币无金叉信号时不开仓。"""
+        strategy = make_strategy(exchange, [
+            make_info("AAAUSDT", cross_signal=CrossSignalType.DEAD),
+            make_info("BBBUSDT", cross_signal=CrossSignalType.NEAR),
+            make_info("CCCUSDT"),
+        ])
+        exchange.fetch_prices = AsyncMock(return_value={"AAAUSDT": 1.0})  # type: ignore
+
+        await strategy.execute()
+
+        positions = exchange.get_positions(tag="micro_cap")
+        assert len(positions) == 0, "无金叉信号不应开仓"
+
+    @pytest.mark.asyncio
+    async def test_empty_candidates_no_error(self, exchange: MockExchange) -> None:
+        """空候选列表不报错、不开仓。"""
+        strategy = make_strategy(exchange, [])
         exchange.fetch_prices = AsyncMock(return_value={})  # type: ignore
 
         await strategy.execute()
 
         positions = exchange.get_positions(tag="micro_cap")
-        assert len(positions) == 0, "无信号不应开仓"
+        assert len(positions) == 0
 
     @pytest.mark.asyncio
-    async def test_ignores_non_golden_signals(
-        self, exchange: MockExchange, strategy: MicroCapStrategy
-    ) -> None:
-        """信号过滤：死叉/横盘信号不触发开仓（策略只消费金叉）。"""
-        exchange.db.save_signal(make_signal("AAAUSDT", signal_type="dead_cross", direction="bearish"))
-        exchange.db.save_signal(make_signal("BBBUSDT", signal_type="sideways_bottom", direction="neutral"))
-        exchange.fetch_prices = AsyncMock(return_value={"AAAUSDT": 1.0, "BBBUSDT": 1.0})  # type: ignore
-
-        await strategy.execute()
-
-        positions = exchange.get_positions(tag="micro_cap")
-        assert len(positions) == 0, "非金叉信号不应开仓"
-
-    @pytest.mark.asyncio
-    async def test_respects_max_positions(
-        self, exchange: MockExchange
-    ) -> None:
+    async def test_respects_max_positions(self, exchange: MockExchange) -> None:
         """边界：已有 max_positions 个持仓时不再开仓。"""
         exchange.open_position(
             symbol="AAAUSDT", direction=TradeDirection.LONG,
@@ -119,48 +122,42 @@ class TestMicroCapSignalConsumption:
             symbol="BBBUSDT", direction=TradeDirection.LONG,
             size=10, price=1.0, tag="micro_cap", reason_text="existing",
         )
-
-        config = MicroCapConfig(max_positions=2, position_size_usdt=10.0)
-        strategy = MicroCapStrategy(exchange, config, FakeMicroCapPicker())
-        exchange.db.save_signal(make_signal("CCCUSDT"))
+        strategy = make_strategy(exchange, [
+            make_info("CCCUSDT", cross_signal=CrossSignalType.GOLDEN),
+        ], max_positions=2)
         exchange.fetch_prices = AsyncMock(return_value={"CCCUSDT": 1.0})  # type: ignore
 
         await strategy.execute()
 
         positions = exchange.get_positions(tag="micro_cap")
         assert len(positions) == 2, "不应该超过 max_positions"
-        symbols = {p.symbol for p in positions}
-        assert "CCCUSDT" not in symbols, "满了不应再开新仓"
+        assert "CCCUSDT" not in {p.symbol for p in positions}
 
     @pytest.mark.asyncio
-    async def test_skip_existing_symbols(
-        self, exchange: MockExchange, strategy: MicroCapStrategy
-    ) -> None:
-        """隔离：已有持仓的 symbol 不重复开仓。"""
+    async def test_skip_existing_symbols(self, exchange: MockExchange) -> None:
+        """已有持仓的 symbol 不重复开仓。"""
         exchange.open_position(
             symbol="AAAUSDT", direction=TradeDirection.LONG,
             size=10, price=1.0, tag="micro_cap", reason_text="existing",
         )
-        # 同一 symbol 有金叉信号，但已持仓
-        exchange.db.save_signal(make_signal("AAAUSDT"))
-        # 新 symbol 有金叉信号
-        exchange.db.save_signal(make_signal("BBBUSDT"))
+        strategy = make_strategy(exchange, [
+            make_info("AAAUSDT", cross_signal=CrossSignalType.GOLDEN),
+            make_info("BBBUSDT", cross_signal=CrossSignalType.GOLDEN),
+        ])
         exchange.fetch_prices = AsyncMock(return_value={"AAAUSDT": 1.0, "BBBUSDT": 2.0})  # type: ignore
 
         await strategy.execute()
 
         positions = exchange.get_positions(tag="micro_cap")
         assert len(positions) == 2, "应有 2 个仓位（1 旧 + 1 新）"
-        symbols = {p.symbol for p in positions}
-        assert "BBBUSDT" in symbols, "应该新开 BBBUSDT"
+        assert "BBBUSDT" in {p.symbol for p in positions}
 
     @pytest.mark.asyncio
-    async def test_action_record_links_signal_ids(
-        self, exchange: MockExchange, strategy: MicroCapStrategy
-    ) -> None:
-        """动作记录的 signal_ids 应关联到消费的信号。"""
-        signal = make_signal("ABCUSDT")
-        exchange.db.save_signal(signal)
+    async def test_action_record_links_signal_ids(self, exchange: MockExchange) -> None:
+        """动作记录的 signal_ids 应关联到落盘的信号。"""
+        strategy = make_strategy(exchange, [
+            make_info("ABCUSDT", cross_signal=CrossSignalType.GOLDEN, sma_200=1.0, price_vs_sma200_percent=2.0),
+        ])
         exchange.fetch_prices = AsyncMock(return_value={"ABCUSDT": 1.0})  # type: ignore
 
         await strategy.execute()
@@ -169,18 +166,16 @@ class TestMicroCapSignalConsumption:
         assert len(positions) == 1
         actions = exchange.db.list_actions_by_position(positions[0].id)
         assert len(actions) == 1
-        assert signal.id in actions[0].signal_ids, "动作记录应关联信号 ID"
+        assert len(actions[0].signal_ids) == 1, "应关联 1 个信号 ID"
 
     @pytest.mark.asyncio
-    async def test_open_multiple_within_quota(
-        self, exchange: MockExchange
-    ) -> None:
-        """混合场景：多个金叉信号按配额开仓。"""
-        config = MicroCapConfig(max_positions=3, position_size_usdt=10.0)
-        strategy = MicroCapStrategy(exchange, config, FakeMicroCapPicker())
-        exchange.db.save_signal(make_signal("AAAUSDT"))
-        exchange.db.save_signal(make_signal("BBBUSDT"))
-        exchange.db.save_signal(make_signal("CCCUSDT"))
+    async def test_multiple_golden_cross_within_quota(self, exchange: MockExchange) -> None:
+        """多个金叉信号按配额开仓。"""
+        strategy = make_strategy(exchange, [
+            make_info("AAAUSDT", cross_signal=CrossSignalType.GOLDEN),
+            make_info("BBBUSDT", cross_signal=CrossSignalType.GOLDEN),
+            make_info("CCCUSDT", cross_signal=CrossSignalType.GOLDEN),
+        ], max_positions=3)
         exchange.fetch_prices = AsyncMock(  # type: ignore
             return_value={"AAAUSDT": 1.0, "BBBUSDT": 2.0, "CCCUSDT": 3.0}
         )
@@ -188,59 +183,53 @@ class TestMicroCapSignalConsumption:
         await strategy.execute()
 
         positions = exchange.get_positions(tag="micro_cap")
-        assert len(positions) == 3, "应该在配额内开 3 个仓位"
-        symbols = {p.symbol for p in positions}
-        assert symbols == {"AAAUSDT", "BBBUSDT", "CCCUSDT"}
+        assert len(positions) == 3
+        assert {p.symbol for p in positions} == {"AAAUSDT", "BBBUSDT", "CCCUSDT"}
 
     @pytest.mark.asyncio
-    async def test_tag_isolation_from_martingale(
-        self, exchange: MockExchange, strategy: MicroCapStrategy
-    ) -> None:
-        """隔离机制：micro_cap 开仓不影响 martingale 持仓。"""
+    async def test_tag_isolation_from_martingale(self, exchange: MockExchange) -> None:
+        """micro_cap 开仓不影响 martingale 持仓。"""
         exchange.open_position(
             symbol="BTCUSDT", direction=TradeDirection.LONG,
-            size=100, price=50000, tag="martingale", reason_text="martingale_entry",
+            size=100, price=50000, tag="martingale", reason_text="entry",
         )
-        exchange.db.save_signal(make_signal("ABCUSDT"))
+        strategy = make_strategy(exchange, [
+            make_info("ABCUSDT", cross_signal=CrossSignalType.GOLDEN),
+        ])
         exchange.fetch_prices = AsyncMock(return_value={"ABCUSDT": 1.0})  # type: ignore
 
         await strategy.execute()
 
-        micro_positions = exchange.get_positions(tag="micro_cap")
-        mart_positions = exchange.get_positions(tag="martingale")
-        assert len(micro_positions) == 1, "micro_cap 应开 1 仓"
-        assert len(mart_positions) == 1, "martingale 持仓应保持不变"
+        assert len(exchange.get_positions(tag="micro_cap")) == 1
+        assert len(exchange.get_positions(tag="martingale")) == 1
 
     @pytest.mark.asyncio
-    async def test_idempotent_no_duplicate_on_re_execute(
-        self, exchange: MockExchange, strategy: MicroCapStrategy
-    ) -> None:
-        """幂等：同一信号被多轮策略看到不会重复开仓。"""
-        exchange.db.save_signal(make_signal("ABCUSDT"))
+    async def test_signal_persisted_to_db(self, exchange: MockExchange) -> None:
+        """检测器产出的信号应落盘到 trading_signals。"""
+        strategy = make_strategy(exchange, [
+            make_info("ABCUSDT", cross_signal=CrossSignalType.GOLDEN, sma_200=1.0, price_vs_sma200_percent=2.0),
+            make_info("XYZUSDT", cross_signal=CrossSignalType.DEAD, sma_200=2.0, price_vs_sma200_percent=-2.0),
+        ])
         exchange.fetch_prices = AsyncMock(return_value={"ABCUSDT": 1.0})  # type: ignore
 
         await strategy.execute()
-        await strategy.execute()  # 第二轮，同一信号仍在 DB 中
 
-        positions = exchange.get_positions(tag="micro_cap")
-        assert len(positions) == 1, "同一信号不应导致重复开仓"
+        # 应有 1 条金叉 + 1 条死叉信号落盘
+        golden = exchange.db.list_signals(signal_type="golden_cross")
+        dead = exchange.db.list_signals(signal_type="dead_cross")
+        assert len(golden) == 1
+        assert len(dead) == 1
 
 
 class TestMicroCapStatus:
     """测试状态报告。"""
 
-    def test_get_status_returns_config_and_counts(
-        self, exchange: MockExchange
-    ) -> None:
-        """get_status 应返回配置和持仓统计。"""
+    def test_get_status_returns_config_and_counts(self, exchange: MockExchange) -> None:
         exchange.open_position(
             symbol="AAAUSDT", direction=TradeDirection.LONG,
             size=10, price=1.0, tag="micro_cap", reason_text="entry",
         )
-        strategy = MicroCapStrategy(
-            exchange, MicroCapConfig(max_positions=5, position_size_usdt=10.0),
-            FakeMicroCapPicker(),
-        )
+        strategy = make_strategy(exchange, [], max_positions=5)
 
         status = strategy.get_status()
 
@@ -249,10 +238,7 @@ class TestMicroCapStatus:
         assert status["total_positions"] == 1
 
     def test_get_status_empty(self, exchange: MockExchange) -> None:
-        """空值：无持仓时状态正确。"""
-        strategy = MicroCapStrategy(
-            exchange, MicroCapConfig(), FakeMicroCapPicker(),
-        )
+        strategy = make_strategy(exchange, [])
 
         status = strategy.get_status()
 

@@ -109,10 +109,12 @@ class SymbolInfo:
   trading_signals 表的信号由信号检测器（detectors/）产出落盘。
 
 ## 信号检测器（detectors/）
-- SignalDetector 基类：与策略平行，由调度器定时调度，产出 SignalResult 落盘
+- SignalDetector 基类：策略组件，接收候选币列表（list[SymbolInfo]）进行检测
+- detect(candidates) 签名：不自己管选币，由策略传入选好的候选币
 - TechnicalSignalDetector：产出 golden_cross/dead_cross/sideways_bottom 信号
-- 策略通过 `get_recent_signals(signal_type=...)` 从 DB 拉取信号做决策
-- 信号可不被消费（内容型信号只落盘，供 LLM 生成贴文）
+- 策略通过 run_detectors(candidates) 调用检测器，信号落盘到 trading_signals
+- 检测器作为策略构造函数参数注入：Strategy(..., signal_detectors=[detector])
+- 调度器不直接管理检测器，只调度策略
 
 ## 回测核心逻辑（pickers/backtest.py）
 - simulate_trade(...)：单笔模拟（无资金约束），逐日判定止盈/下架/未决
@@ -200,13 +202,14 @@ SignalRecord    ->    StrategyActionRecord  ->   OrderRecord
 22. ⚠️ `StrategyExecutionRecord` **不含** `actions_json`！动作记录已拆到独立的
     `trading_strategy_actions` 表，通过 `execution_id` 关联到轮次记录。
     API 层负责 join 查询。
-23. ⚠️ 信号检测器（SignalDetector）与策略（Strategy）是**平行**的，不继承 Strategy！
-    - 检测器产出 SignalResult（观察），策略产出 StrategyAction（交易）
-    - 检测器只依赖 repo（写信号），不需要 exchange/symbol_picker
-    - 检测器在 deps.py 中传入 `StrategyScheduler(detectors=[...])`
-24. ⚠️ 微市值策略（MicroCapStrategy）**不再用 SymbolPicker 做信号过滤**！
-    策略从 DB 拉取 `golden_cross` 信号做决策。SymbolPicker 仍作为基类依赖传入，
-    但 execute() 内不调用 picker.pick()。
+23. ⚠️ 信号检测器（SignalDetector）是**策略组件**，不是与策略平行的独立调度实体！
+    - 检测器 detect(candidates) 接收策略选好的 list[SymbolInfo]，不自己管选币
+    - 策略通过 run_detectors(candidates) 调用检测器，信号落盘到 trading_signals
+    - 调度器只调度策略，不直接管理检测器（无 _execute_detector 等方法）
+    - 检测器通过策略构造函数 signal_detectors=[...] 注入
+24. ⚠️ 微市值策略（MicroCapStrategy）的执行流程是：选币(picker) -> 信号检测(detectors) -> 从 DB 拉取信号决策。
+    picker 仍用于选币（不是死代码），检测器接收 picker 的结果产出信号落盘，
+    策略再从 DB 拉取 golden_cross 信号做开仓决策。
 25. ⚠️ 动作记录的 `signal_ids: list[str]` 可以关联多个信号（一个决策可基于多信号）。
     策略持仓检查（tag 隔离 + status 过滤）天然防止重复交易，不需要信号层防重复。
 26. ⚠️ `sqlalchemy_impl.py` 的 `metadata_json` 读取时必须 `json.loads`（曾漏掉，已修复）。

@@ -7,7 +7,7 @@ from typing import AsyncGenerator, Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from trading_service.api import positions, orders, signals, timeline, strategies, detectors
+from trading_service.api import positions, orders, signals, timeline, strategies
 from trading_service.api.deps import get_strategy_scheduler
 from trading_service.config import settings
 from trading_service.migration_check import check_migrations, run_migrations
@@ -79,7 +79,6 @@ app.include_router(orders.router, prefix="/api/orders")
 app.include_router(signals.router, prefix="/api/signals")
 app.include_router(timeline.router, prefix="/api")
 app.include_router(strategies.router, prefix="/api/strategies")
-app.include_router(detectors.router, prefix="/api")
 
 
 @app.get("/")

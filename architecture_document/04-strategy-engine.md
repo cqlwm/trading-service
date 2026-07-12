@@ -404,46 +404,58 @@ graph TD
 
 ## 7. 信号检测器（SignalDetector）
 
-信号检测器与策略平行，由调度器统一管理。产出信号落盘到 `trading_signals` 表。
+信号检测器是**策略的组件**，由策略在 execute() 内部调用。检测器接收策略选好的候选币列表进行信号检测，产出的信号落盘到 `trading_signals` 表。
 
 ### 7.1 设计定位
 
 ```
 调度器（cron）
-  ├─ 信号检测器（先跑）-> 产出信号 -> 落盘 trading_signals
-  └─ 策略（后跑）-> 拉取信号 -> 决策 -> 动作记录（含 signal_ids）+ 订单
+  └─ 策略（唯一调度对象）
+       ├─ 1. 选币：symbol_picker.pick() -> list[SymbolInfo]
+       ├─ 2. 信号检测：detectors.detect(candidates) -> 信号落盘
+       └─ 3. 决策：基于信号做交易 -> 动作记录（含 signal_ids）+ 订单
 ```
 
-- **信号检测器**：扫描市场，产出观察信号（如金叉、死叉、连涨3日）
-- **策略**：从数据库拉取信号作为决策输入，策略自身持仓检查天然防止重复交易
+- **检测器是策略组件**：不独立调度，由策略在选币后调用
+- **检测器不管选币**：接收策略传入的候选币列表（已含技术分析字段）
 - **信号可不被消费**：内容型信号（如连涨3日）只落盘，供 LLM 生成贴文
+- **策略自动幂等**：持仓检查（tag 隔离 + status 过滤）天然防止重复交易
 
 ### 7.2 信号检测器基类
 
 ```python
 class SignalDetector(ABC):
-    name: str = ""   # 检测器标识
-    cron: str = ""   # cron 表达式
+    name: str = ""  # 检测器标识
 
     def __init__(self, repo: TradingRepository) -> None: ...
 
     @abstractmethod
-    async def detect(self) -> list[SignalResult]: ...
+    async def detect(self, candidates: list[SymbolInfo]) -> list[SignalResult]: ...
 
     def get_status(self) -> dict[str, Any]: ...
 ```
 
-### 7.3 已实现的检测器
+### 7.3 策略基类的检测器支持
 
-| 检测器 | name | cron | 产出信号 |
-|--------|------|------|----------|
-| 技术分析信号检测器 | `technical_signal` | 每5分钟 | `golden_cross`（金叉）、`dead_cross`（死叉）、`sideways_bottom`（底部横盘）|
+```python
+class Strategy(ABC):
+    def __init__(self, exchange, config, symbol_picker, signal_detectors=None): ...
 
-### 7.4 新增信号检测器步骤
+    async def run_detectors(self, candidates, execution_id="") -> list[SignalRecord]:
+        """运行所有检测器，信号落盘并返回。"""
+```
 
-1. 继承 `SignalDetector`，设 `name` 和 `cron` 类属性
-2. 实现 `detect()` 方法，返回 `list[SignalResult]`
-3. 在 `api/deps.py` 实例化并传入 `StrategyScheduler(detectors=[...])`
+### 7.4 已实现的检测器
+
+| 检测器 | name | 产出信号 |
+|--------|------|----------|
+| 技术分析信号检测器 | `technical_signal` | `golden_cross`（金叉）、`dead_cross`（死叉）、`sideways_bottom`（底部横盘）|
+
+### 7.5 新增信号检测器步骤
+
+1. 继承 `SignalDetector`，设 `name` 类属性
+2. 实现 `detect(candidates)` 方法，接收 `list[SymbolInfo]`，返回 `list[SignalResult]`
+3. 在 `api/deps.py` 实例化，通过策略构造函数 `signal_detectors=[...]` 注入
 
 ---
 

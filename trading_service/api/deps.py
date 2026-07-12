@@ -38,6 +38,8 @@ _martingale_strategy = MartingaleStrategy(
 )
 # 微市值：选币（AlphaTokenSource）-> 技术分析增强（TechnicalAnalysisFilter）-> 策略
 _micro_cap_client = BinanceClient(timeout=30)
+# 技术信号检测器（作为微市值策略的组件，接收策略选好的候选币进行检测）
+_technical_signal_detector = TechnicalSignalDetector(repo=_trading_store)
 _micro_cap_strategy = MicroCapStrategy(
     exchange=_exchange,
     config=MicroCapConfig(),
@@ -51,6 +53,7 @@ _micro_cap_strategy = MicroCapStrategy(
             ),
         ],
     ),
+    signal_detectors=[_technical_signal_detector],
 )
 # 马丁做空：涨幅榜选币 -> 技术分析增强 -> 做空信号过滤 -> 做空马丁策略
 _martingale_short_strategy = MartingaleShortStrategy(
@@ -75,14 +78,10 @@ _martingale_short_strategy = MartingaleShortStrategy(
         ],
     ),
 )
-# 信号检测器（与策略平行，由调度器定时调度）
-_technical_signal_detector = TechnicalSignalDetector(repo=_trading_store, client=_micro_cap_client)
-
-# 统一策略调度器（管理所有策略和检测器的定时执行）
+# 统一策略调度器（管理所有策略的定时执行，信号检测器作为策略组件由策略内部调用）
 _strategy_scheduler = StrategyScheduler(
     repo=_trading_store,
     strategies=[_martingale_strategy, _micro_cap_strategy, _martingale_short_strategy],
-    detectors=[_technical_signal_detector],
 )
 
 

@@ -1,12 +1,15 @@
 from __future__ import annotations
+
+import uuid
 from typing import Any
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from trading_service.exchange import MockExchange
-from trading_service.pickers import ISymbolPicker
+from trading_service.pickers import ISymbolPicker, SymbolInfo
 from trading_service.repository import SignalRecord
+from trading_service.detectors.base import SignalDetector
 
 
 @dataclass
@@ -37,10 +40,12 @@ class Strategy(ABC):
         exchange: MockExchange,
         config: StrategyConfig,
         symbol_picker: ISymbolPicker,
+        signal_detectors: list[SignalDetector] | None = None,
     ) -> None:
         self.exchange = exchange
         self.config = config
         self.symbol_picker = symbol_picker
+        self.signal_detectors = signal_detectors or []
 
     @abstractmethod
     async def execute(self, execution_id: str = "") -> list[StrategyAction]:
@@ -67,3 +72,30 @@ class Strategy(ABC):
         return self.exchange.db.list_signals(
             symbol=symbol, signal_type=signal_type, limit=limit,
         )
+
+    async def run_detectors(
+        self, candidates: list[SymbolInfo], execution_id: str = ""
+    ) -> list[SignalRecord]:
+        """运行所有信号检测器，将产出的信号落盘并返回。
+
+        检测器接收策略选好的候选币列表，产出信号落盘到 trading_signals 表。
+        返回落盘的 SignalRecord 列表，策略可选择消费这些信号做决策。
+        """
+        if not self.signal_detectors:
+            return []
+        saved_signals: list[SignalRecord] = []
+        for detector in self.signal_detectors:
+            results = await detector.detect(candidates)
+            for result in results:
+                signal = SignalRecord(
+                    id=uuid.uuid4().hex[:12],
+                    symbol=result.symbol,
+                    signal_type=result.signal_type,
+                    direction=result.direction,
+                    severity=result.severity,
+                    description=result.description,
+                    metadata_json=result.metadata,
+                )
+                self.exchange.db.save_signal(signal)
+                saved_signals.append(signal)
+        return saved_signals
