@@ -176,3 +176,87 @@ class TestDetectorAsStrategyComponent:
         strategy = TestStrategy(exchange, StrategyConfig(), FakePicker())
         saved = await strategy.run_detectors([make_info("BTCUSDT")])
         assert len(saved) == 0
+
+
+def make_klines_df(
+    cross_signal: str | None = None,
+    price_vs_sma200: float | None = None,
+    sma_200: float | None = None,
+    is_sideways: bool = False,
+    volatility: float | None = None,
+):
+    """构建一个含指标列的 DataFrame（模拟 TechnicalAnalysisFilter 的输出）。"""
+    import pandas as pd
+    return pd.DataFrame([{
+        "datetime": 0,
+        "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0,
+        "sma_200": sma_200,
+        "cross_signal": cross_signal,
+        "price_vs_sma200_percent": price_vs_sma200,
+        "volatility_10": volatility,
+        "is_sideways_bottom": is_sideways,
+    }])
+
+
+class TestDetectorDataFrameRead:
+    """测试检测器从 DataFrame 读取指标。"""
+
+    @pytest.mark.asyncio
+    async def test_read_golden_cross_from_dataframe(self, exchange: MockExchange) -> None:
+        """从 DataFrame 读取金叉信号。"""
+        detector = TechnicalSignalDetector(repo=exchange.db)
+        info = SymbolInfo(symbol="BTCUSDT")
+        info.klines = make_klines_df(cross_signal="golden", sma_200=50000, price_vs_sma200=2.5)
+
+        results = await detector.detect([info])
+
+        assert len(results) == 1
+        assert results[0].signal_type == "golden_cross"
+        assert results[0].metadata["sma_200"] == 50000
+
+    @pytest.mark.asyncio
+    async def test_read_dead_cross_from_dataframe(self, exchange: MockExchange) -> None:
+        """从 DataFrame 读取死叉信号。"""
+        detector = TechnicalSignalDetector(repo=exchange.db)
+        info = SymbolInfo(symbol="ETHUSDT")
+        info.klines = make_klines_df(cross_signal="dead", sma_200=3000, price_vs_sma200=-3.0)
+
+        results = await detector.detect([info])
+
+        assert len(results) == 1
+        assert results[0].signal_type == "dead_cross"
+
+    @pytest.mark.asyncio
+    async def test_read_sideways_from_dataframe(self, exchange: MockExchange) -> None:
+        """从 DataFrame 读取横盘信号。"""
+        detector = TechnicalSignalDetector(repo=exchange.db)
+        info = SymbolInfo(symbol="SOLUSDT")
+        info.klines = make_klines_df(is_sideways=True, volatility=5.0)
+
+        results = await detector.detect([info])
+
+        assert len(results) == 1
+        assert results[0].signal_type == "sideways_bottom"
+
+    @pytest.mark.asyncio
+    async def test_dataframe_takes_priority_over_old_fields(self, exchange: MockExchange) -> None:
+        """DataFrame 有值时优先于旧字段。"""
+        detector = TechnicalSignalDetector(repo=exchange.db)
+        info = SymbolInfo(symbol="BTCUSDT", cross_signal=CrossSignalType.DEAD)  # 旧字段是死叉
+        info.klines = make_klines_df(cross_signal="golden")  # DataFrame 是金叉
+
+        results = await detector.detect([info])
+
+        assert len(results) == 1
+        assert results[0].signal_type == "golden_cross", "应以 DataFrame 为准"
+
+    @pytest.mark.asyncio
+    async def test_fallback_to_old_fields_when_no_dataframe(self, exchange: MockExchange) -> None:
+        """无 DataFrame 时回退到旧字段。"""
+        detector = TechnicalSignalDetector(repo=exchange.db)
+        info = make_info("BTCUSDT", cross_signal=CrossSignalType.GOLDEN, sma_200=50000)
+
+        results = await detector.detect([info])
+
+        assert len(results) == 1
+        assert results[0].signal_type == "golden_cross"

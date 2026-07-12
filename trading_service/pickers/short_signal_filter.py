@@ -40,16 +40,30 @@ class ShortSignalFilter(ISymbolFilter):
         return result
 
     def _is_short_signal(self, info: SymbolInfo) -> bool:
-        """判定是否有做空信号。"""
+        """判定是否有做空信号。优先读 DataFrame，回退到旧字段。"""
+        cross: str | None = None
+        price_vs_sma: float | None = None
+
+        # 优先读 DataFrame
+        if info.klines is not None and len(info.klines) > 0:
+            latest = info.klines.iloc[-1]
+            cross_val = latest.get("cross_signal")
+            cross = cross_val if isinstance(cross_val, str) else None
+            price_vs_sma_val = latest.get("price_vs_sma200_percent")
+            price_vs_sma = price_vs_sma_val if isinstance(price_vs_sma_val, (int, float)) else None
+
+        # 回退到旧字段
+        if cross is None and info.cross_signal is not None:
+            cross = info.cross_signal.value
+        if price_vs_sma is None:
+            price_vs_sma = info.price_vs_sma200_percent
+
         # 死叉
-        if info.cross_signal == CrossSignalType.DEAD:
+        if cross == CrossSignalType.DEAD.value:
             return True
 
         # 远离均线顶部（price_vs_sma200_percent > 阈值）
-        if (
-            info.price_vs_sma200_percent is not None
-            and info.price_vs_sma200_percent > self._overbought_threshold
-        ):
+        if price_vs_sma is not None and price_vs_sma > self._overbought_threshold:
             return True
 
         return False

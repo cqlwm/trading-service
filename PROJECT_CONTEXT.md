@@ -92,14 +92,25 @@ class SymbolInfo:
     # Alpha扩展字段
     base_asset: str = ""
     yesterday_change_percent: float = 0.0
-    # 技术分析字段（TechnicalAnalysisFilter 回填）
+    # 技术分析字段（由 TechnicalAnalysisFilter 回填，从 klines 派生，过渡保留）
     sma_200: float | None = None
     cross_signal: CrossSignalType | None = None
     is_sideways_bottom: bool = False
     volatility_10: float | None = None
+    # K线+指标 DataFrame（由 TechnicalAnalysisFilter 构建，一次拉取处处复用）
+    # 列：datetime, open, high, low, close, volume, sma_200, cross_signal, ...
+    # 加新指标只需追加列，不改 SymbolInfo。检测器和策略复用此 DataFrame。
+    klines: pd.DataFrame | None = None
     # 合约生命周期字段（AlphaTokenSource 从 exchangeInfo 回填）
     delivery_date: int | None = None  # 永续正常=哨兵值，即将下架=具体时点(ms)
     # ...
+
+## DataFrame K线复用原则（2026-07-12 重构）
+- K 线只在 TechnicalAnalysisFilter 拉 API 一次，构建为 DataFrame 挂到 info.klines
+- 后续 ShortSignalFilter、信号检测器、策略全部复用 DataFrame，不重新拉 K 线
+- 加新指标（如 RSI、SuperTrend）：在 filter 或检测器中用 TA-Lib 算，追加为 DataFrame 列
+- 检测器自给自足：需要的指标如果 DataFrame 没有，检测器自己算并追加列
+- 检测器和过滤器优先读 DataFrame，回退到旧字段（过渡兼容）
 
 ## 信号判定纯函数（pickers/signal.py）
 - is_notable_signal(info) -> bool：金叉/靠近均线/横盘返回True，死叉/None返回False
@@ -274,7 +285,7 @@ SignalRecord    ->    StrategyActionRecord  ->   OrderRecord
 ## 后端
 uv run python main.py                    # 启动 :8001
 .venv/bin/pyright                        # 类型检查（必须 0 errors）
-.venv/bin/python -m pytest tests/ -q     # 测试（256 passed, ~1.6s）
+.venv/bin/python -m pytest tests/ -q     # 测试（264 passed, ~1.1s）
 .venv/bin/alembic upgrade head           # 执行数据库迁移
 .venv/bin/alembic revision --autogenerate -m "描述"  # 生成迁移脚本
 
