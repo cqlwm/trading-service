@@ -80,8 +80,24 @@ _martingale_short_strategy = MartingaleShortStrategy(
         ],
     ),
 )
+# 内容型策略：涨幅榜选币 -> 连续涨跌K线检测 -> 选 1 条生成贴文
+from trading_service.detectors.consecutive_candle import ConsecutiveCandleDetector
+from trading_service.strategies.content_scan import ContentScanConfig, ContentScanStrategy
+
+_consecutive_candle_detector = ConsecutiveCandleDetector(
+    repo=_trading_store, client=_micro_cap_client, interval="1d", min_streak=3,
+)
+_content_scan_strategy = ContentScanStrategy(
+    exchange=_exchange,
+    config=ContentScanConfig(),
+    symbol_picker=SelectionPipeline(
+        source=TopGainersSource(client=_micro_cap_client, top_n=20),
+    ),
+    signal_detectors=[_consecutive_candle_detector],
+)
+
 # 贴文生成器（LLM 生成交易动态贴文，api_key 为空时自动跳过）
-from trading_service.content.post_generator import PostGenerator, create_openai_client
+from trading_service.content import PostGenerator, create_openai_client
 
 _post_generator: PostGenerator | None = None
 if settings.posts_enabled:
@@ -101,7 +117,7 @@ if settings.posts_enabled:
 # 统一策略调度器（管理所有策略的定时执行，信号检测器作为策略组件由策略内部调用）
 _strategy_scheduler = StrategyScheduler(
     repo=_trading_store,
-    strategies=[_martingale_strategy, _micro_cap_strategy, _martingale_short_strategy],
+    strategies=[_martingale_strategy, _micro_cap_strategy, _martingale_short_strategy, _content_scan_strategy],
     post_generator=_post_generator,
 )
 

@@ -25,7 +25,7 @@ from trading_service.repository import (
 from trading_service.strategies.base import Strategy, StrategyAction
 
 if TYPE_CHECKING:
-    from trading_service.content.post_generator import PostGenerator
+    from trading_service.content.post_generator import IPostGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ class StrategyScheduler:
         self,
         repo: TradingRepository,
         strategies: list[Strategy],
-        post_generator: PostGenerator | None = None,
+        post_generator: IPostGenerator | None = None,
     ) -> None:
         self._repo = repo
         self._strategies: dict[str, Strategy] = {s.name: s for s in strategies if s.name}

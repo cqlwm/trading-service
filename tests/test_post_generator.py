@@ -204,3 +204,79 @@ class TestPostGeneratorHistoricalPosts:
         gen.generate_for_execution("exec001")
 
         assert "暂无历史贴文" in llm.prompts[0]
+
+
+def make_content_action(
+    symbol: str = "BTCUSDT",
+    execution_id: str = "exec_content_001",
+    strategy_name: str = "content_scan",
+    reason_text: str = "BTCUSDT 连续 3 天上涨",
+    signal_id: str = "sig001",
+) -> StrategyActionRecord:
+    """构造一个 content 类型的动作记录。"""
+    return StrategyActionRecord(
+        id=f"act_content_{symbol}",
+        execution_id=execution_id,
+        strategy_name=strategy_name,
+        action_type="content",
+        symbol=symbol,
+        position_id="",
+        order_id="",
+        reason_text=reason_text,
+        reason_data={
+            "signal_type": "consecutive_rise",
+            "direction": "bullish",
+            "severity": 3,
+            "metadata": {"streak_days": 3, "change_pct": 30.0},
+        },
+        signal_ids=[signal_id],
+    )
+
+
+class TestPostGeneratorContentPath:
+    """内容型路径测试：content 动作 -> 走信号路径生成贴文。"""
+
+    def test_content_action_generates_post(self, repo, posts_dir: Path) -> None:
+        """✅ content 动作 -> 生成贴文 -> 保存文件。"""
+        repo.save_action(make_content_action(symbol="BTCUSDT"))
+        llm = FakeLLMClient(response="BTC 连涨3天，势头正猛！")
+        gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
+
+        files = gen.generate_for_execution("exec_content_001")
+
+        assert len(files) == 1
+        content = files[0].read_text(encoding="utf-8")
+        assert "BTC 连涨3天，势头正猛！" in content
+
+    def test_content_prompt_uses_market_observer_role(self, repo, posts_dir: Path) -> None:
+        """✅ content prompt 使用市场观察者角色（不是马丁做空）。"""
+        repo.save_action(make_content_action(symbol="BTCUSDT"))
+        llm = FakeLLMClient()
+        gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
+
+        gen.generate_for_execution("exec_content_001")
+
+        assert len(llm.prompts) == 1
+        assert "市场观察者" in llm.prompts[0], "应使用内容型角色"
+        assert "马丁格尔做空" not in llm.prompts[0], "不应包含交易型角色"
+
+    def test_content_prompt_includes_signals(self, repo, posts_dir: Path) -> None:
+        """✅ content prompt 应包含信号信息。"""
+        # 先存信号
+        from trading_service.repository.abc import SignalRecord
+        repo.save_signal(SignalRecord(
+            id="sig001",
+            symbol="BTCUSDT",
+            signal_type="consecutive_rise",
+            direction="bullish",
+            severity=3,
+            description="BTCUSDT 连续 3 天上涨",
+            metadata_json={"streak_days": 3, "change_pct": 30.0},
+        ))
+        repo.save_action(make_content_action(symbol="BTCUSDT", signal_id="sig001"))
+        llm = FakeLLMClient()
+        gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
+
+        gen.generate_for_execution("exec_content_001")
+
+        assert "consecutive_rise" in llm.prompts[0], "prompt 应包含信号类型"

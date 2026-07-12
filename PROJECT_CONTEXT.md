@@ -30,7 +30,13 @@ trading_service/
 │   ├── base.py                  # Strategy 基类 + StrategyAction + StrategyConfig
 │   ├── martingale.py            # 马丁格尔做多策略
 │   ├── martingale_short.py      # 马丁格尔做空策略（继承做多）
-│   └── micro_cap.py             # 微市值策略（信号驱动：从 DB 拉取金叉信号决策）
+│   ├── micro_cap.py             # 微市值策略（信号驱动：从 DB 拉取金叉信号决策）
+│   └── content_scan.py          # 内容型策略（不开仓，只产出信号+content动作触发贴文生成）
+│
+├── detectors/          # 信号检测器（策略组件）
+│   ├── base.py                  # SignalDetector ABC + SignalResult
+│   ├── technical.py             # 技术分析检测器（金叉/死叉/横盘）
+│   └── consecutive_candle.py    # 连续涨跌K线检测器（consecutive_rise/fall）
 │
 ├── repository/        # 数据持久化层
 │   ├── abc.py                   # Record dataclass + TradingRepository 抽象接口
@@ -197,6 +203,14 @@ SignalRecord    ->    StrategyActionRecord  ->   OrderRecord
 - LLM：OpenAI 兼容 API（openai SDK），config 中 `llm_base_url` / `llm_api_key` / `llm_model` 配置
 - 贴文保存：`~/projects/mydata/posts/{timestamp}_{symbol}.md`，含正文 + 动作附录
 - `posts_enabled` 总开关，`llm_api_key` 为空时 PostGenerator 为 None，自动跳过
+- **两条贴文路径**（PostGenerator 自动分流）：
+  - 交易型（马丁做空等）：action_type=open/add/close -> 交易故事线上下文 -> 交易员角色 prompt
+  - 内容型（content_scan）：action_type=content -> 信号上下文 -> 市场观察者角色 prompt
+- **内容型策略 ContentScanStrategy**（每 10 分钟）：
+  - 选币：TopGainersSource（24h ticker 涨幅榜 top 20）
+  - 信号检测：ConsecutiveCandleDetector（拉 1d K 线，检测连续涨/跌天数 >= 3）
+  - 选 severity 最高的 1 条信号，写 action_type="content" 动作记录
+  - 不开仓、不平仓，纯内容产出，触发贴文生成
 
 # -----------------------
 # ⚠️ 常见陷阱检查清单（踩过的坑！）
