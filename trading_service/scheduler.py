@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -23,6 +23,9 @@ from trading_service.repository import (
     TradingRepository,
 )
 from trading_service.strategies.base import Strategy, StrategyAction
+
+if TYPE_CHECKING:
+    from trading_service.content.post_generator import PostGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -63,16 +66,19 @@ class StrategyScheduler:
 
     管理所有注册策略的定时执行，支持启动/停止/状态查询/执行历史。
     信号检测器作为策略组件，由策略在 execute() 内部调用，调度器不直接管理。
+    策略执行后可选触发贴文生成（PostGenerator）。
     """
 
     def __init__(
         self,
         repo: TradingRepository,
         strategies: list[Strategy],
+        post_generator: PostGenerator | None = None,
     ) -> None:
         self._repo = repo
         self._strategies: dict[str, Strategy] = {s.name: s for s in strategies if s.name}
         self._scheduler = AsyncIOScheduler()
+        self._post_generator = post_generator
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -214,6 +220,13 @@ class StrategyScheduler:
             logger.info(
                 f"策略 {strategy_name} 定时执行完成: {len(actions)} 项操作"
             )
+
+            # 贴文生成：有动作变动时触发，失败不影响策略执行
+            if actions and self._post_generator:
+                try:
+                    self._post_generator.generate_for_execution(execution_id)
+                except Exception as e:
+                    logger.warning(f"贴文生成失败（不影响策略执行）: {e}")
         except Exception as e:
             finished_at = datetime.now(timezone.utc)
             self._repo.save_execution(StrategyExecutionRecord(
@@ -258,6 +271,14 @@ class StrategyScheduler:
             logger.info(
                 f"策略 {strategy_name} 手动执行完成: {len(actions)} 项操作"
             )
+
+            # 贴文生成：有动作变动时触发，失败不影响策略执行
+            if actions and self._post_generator:
+                try:
+                    self._post_generator.generate_for_execution(execution_id)
+                except Exception as e:
+                    logger.warning(f"贴文生成失败（不影响策略执行）: {e}")
+
             return execution_id, actions
         except Exception as e:
             finished_at = datetime.now(timezone.utc)

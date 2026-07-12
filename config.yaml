@@ -16,3 +16,12 @@ news_service_timeout: 30
 # 交易所配置
 binance_api_key: ""
 binance_api_secret: ""
+
+# LLM 配置（OpenAI 兼容 API，支持 DeepSeek、通义千问、火山引擎等）
+# llm_base_url: "https://api.openai.com/v1"
+# llm_api_key: ""
+# llm_model: "gpt-4o-mini"
+
+# 贴文配置
+# posts_enabled: true
+# posts_dir: "~/projects/trading-service/mydata/posts"

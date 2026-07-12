@@ -80,10 +80,29 @@ _martingale_short_strategy = MartingaleShortStrategy(
         ],
     ),
 )
+# 贴文生成器（LLM 生成交易动态贴文，api_key 为空时自动跳过）
+from trading_service.content.post_generator import PostGenerator, create_openai_client
+
+_post_generator: PostGenerator | None = None
+if settings.posts_enabled:
+    _llm_result = create_openai_client(
+        base_url=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+        model=settings.llm_model,
+    )
+    if _llm_result is not None:
+        _post_generator = PostGenerator(
+            repo=_trading_store,
+            posts_dir=settings.posts_dir,
+            llm_client=_llm_result[0],
+            llm_model=_llm_result[1],
+        )
+
 # 统一策略调度器（管理所有策略的定时执行，信号检测器作为策略组件由策略内部调用）
 _strategy_scheduler = StrategyScheduler(
     repo=_trading_store,
     strategies=[_martingale_strategy, _micro_cap_strategy, _martingale_short_strategy],
+    post_generator=_post_generator,
 )
 
 

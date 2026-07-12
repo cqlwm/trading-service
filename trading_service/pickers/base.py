@@ -26,8 +26,9 @@ class SymbolInfo:
     symbol: str  # 交易对符号（如 BTCUSDT）
     price: float = 0.0  # 当前价格
     volume_24h: float = 0.0  # 24小时成交量
-    market_cap: float = 0.0  # 市值（USDT）
     price_change_pct_24h: float = 0.0  # 24小时涨跌幅
+
+    market_cap: float = 0.0  # 市值（USDT）
 
     # === Alpha 选币扩展字段 ===
     base_asset: str = ""  # 基础资产（如 BTC）

@@ -52,7 +52,9 @@ trading_service/
 │   └── timeline.py              # 时间线 API
 │
 ├── exchange.py        # Mock交易所实现（开仓/加仓/平仓 均写入动作记录）
-├── scheduler.py       # 策略调度器（统一管理策略+检测器的定时调度）
+├── scheduler.py       # 策略调度器（统一管理策略定时调度，执行后可选触发贴文生成）
+├── content/           # 内容生成模块
+│   └── post_generator.py        # PostGenerator（LLM 生成交易贴文，保存到 mydata/posts/）
 └── config.py
 
 frontend/              # ✅ 前端独立项目（React 19 + Vite 8 + TS + TanStack Query）
@@ -186,6 +188,15 @@ SignalRecord    ->    StrategyActionRecord  ->   OrderRecord
 - **动作记录**：MockExchange 在开仓/加仓/平仓时写入，含 reason_text + reason_data + signal_ids
 - **订单**：纯交易事实（不含 reason，reason 已移至动作记录）
 - **故事线**：`list_actions_by_position` / `list_actions_by_symbol` 按时间正序返回完整交易故事
+
+## 贴文自动生成（2026-07-11 新增）
+- 策略执行后有仓位变动（open/add/close）时，自动触发 `PostGenerator.generate_for_execution(execution_id)`
+- 贴文生成在 scheduler._execute_strategy 中 try/except 包裹，失败不影响策略执行
+- 上下文（全量提交 LLM，让它自己选素材）：本次动作 + 该 symbol 完整故事线 + 历史贴文 + 当前持仓
+- 历史贴文作为去重参考：LLM 知道之前发过什么，避免重复
+- LLM：OpenAI 兼容 API（openai SDK），config 中 `llm_base_url` / `llm_api_key` / `llm_model` 配置
+- 贴文保存：`~/projects/mydata/posts/{timestamp}_{symbol}.md`，含正文 + 动作附录
+- `posts_enabled` 总开关，`llm_api_key` 为空时 PostGenerator 为 None，自动跳过
 
 # -----------------------
 # ⚠️ 常见陷阱检查清单（踩过的坑！）

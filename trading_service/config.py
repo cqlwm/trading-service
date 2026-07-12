@@ -33,6 +33,15 @@ class Settings(BaseSettings):
     binance_api_key: str = ""
     binance_api_secret: str = ""
 
+    # LLM 配置（OpenAI 兼容 API，支持 DeepSeek、通义千问等）
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_api_key: str = ""
+    llm_model: str = "gpt-4o-mini"
+
+    # 贴文配置
+    posts_dir: str = "~/projects/trading-service/mydata/posts"
+    posts_enabled: bool = True  # 总开关，llm_api_key 为空时自动跳过
+
     model_config = SettingsConfigDict(
         env_prefix="TRADING_",
         env_file=".env",
@@ -81,3 +90,7 @@ settings.db_path = str(Path(settings.db_path).expanduser())
 # 确保 DB 路径存在
 DB_PARENT = Path(settings.db_path).parent
 DB_PARENT.mkdir(parents=True, exist_ok=True)
+
+# 展开贴文目录路径并确保目录存在
+settings.posts_dir = str(Path(settings.posts_dir).expanduser())
+Path(settings.posts_dir).mkdir(parents=True, exist_ok=True)

@@ -285,3 +285,102 @@ class TestSchedulerScheduleStatus:
             assert names == {"fake", "failing"}
         finally:
             await scheduler.shutdown()
+
+
+class FakePostGenerator:
+    """内存版贴文生成器，记录调用。"""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def generate_for_execution(self, execution_id: str) -> list:
+        self.calls.append(execution_id)
+        return []
+
+
+class TestSchedulerPostGeneration:
+    """测试调度器执行后触发贴文生成。"""
+
+    @pytest.mark.asyncio
+    async def test_post_generator_called_on_actions(self, exchange: MockExchange) -> None:
+        """✅ 有动作时调用 post_generator.generate_for_execution。"""
+        strategy = FakeStrategy(exchange)
+        repo = exchange.db  # type: ignore[attr-defined]
+        post_gen = FakePostGenerator()
+        scheduler = StrategyScheduler(
+            repo=repo, strategies=[strategy], post_generator=post_gen,  # type: ignore[arg-type]
+        )
+        await scheduler.start()
+        try:
+            await scheduler._execute_strategy("fake")
+
+            assert len(post_gen.calls) == 1, "应调用一次贴文生成"
+        finally:
+            await scheduler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_post_generator_not_called_on_no_actions(self, exchange: MockExchange) -> None:
+        """✅ 无动作时不调用 post_generator。"""
+        # FailingStrategy 抛异常 -> 无动作
+        strategy = FailingStrategy(exchange)
+        repo = exchange.db  # type: ignore[attr-defined]
+        post_gen = FakePostGenerator()
+        scheduler = StrategyScheduler(
+            repo=repo, strategies=[strategy], post_generator=post_gen,  # type: ignore[arg-type]
+        )
+        await scheduler.start()
+        try:
+            await scheduler._execute_strategy("failing")
+
+            assert len(post_gen.calls) == 0, "无动作时不应调用贴文生成"
+        finally:
+            await scheduler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_post_generator_none_does_not_crash(self, scheduler: StrategyScheduler) -> None:
+        """✅ post_generator 为 None 时不崩溃。"""
+        await scheduler.start()
+        try:
+            await scheduler._execute_strategy("fake")
+            # 不崩溃即通过
+        finally:
+            await scheduler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_post_generator_called_on_manual_execute(self, exchange: MockExchange) -> None:
+        """✅ 手动执行（execute_strategy_manually）有动作时也触发贴文生成。"""
+        strategy = FakeStrategy(exchange)
+        repo = exchange.db  # type: ignore[attr-defined]
+        post_gen = FakePostGenerator()
+        scheduler = StrategyScheduler(
+            repo=repo, strategies=[strategy], post_generator=post_gen,  # type: ignore[arg-type]
+        )
+        await scheduler.start()
+        try:
+            execution_id, actions = await scheduler.execute_strategy_manually("fake")
+
+            assert len(actions) == 1, "应有一个动作"
+            assert len(post_gen.calls) == 1, "手动执行也应触发贴文生成"
+            assert post_gen.calls[0] == execution_id
+        finally:
+            await scheduler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_post_generator_not_called_on_manual_execute_no_actions(
+        self, exchange: MockExchange
+    ) -> None:
+        """✅ 手动执行无动作时不触发贴文生成。"""
+        strategy = FailingStrategy(exchange)
+        repo = exchange.db  # type: ignore[attr-defined]
+        post_gen = FakePostGenerator()
+        scheduler = StrategyScheduler(
+            repo=repo, strategies=[strategy], post_generator=post_gen,  # type: ignore[arg-type]
+        )
+        await scheduler.start()
+        try:
+            with pytest.raises(RuntimeError):
+                await scheduler.execute_strategy_manually("failing")
+
+            assert len(post_gen.calls) == 0, "执行失败无动作时不应触发贴文生成"
+        finally:
+            await scheduler.shutdown()
