@@ -315,6 +315,14 @@ class InMemoryTradingRepository(TradingRepository):
         results.sort(key=lambda p: p.created_at)
         return results
 
+    def list_posts_by_symbol(self, symbol: str, limit: int = 50) -> list[PostRecord]:
+        results = list(self.posts.values())
+        if self._in_transaction:
+            results = results + list(self._temp_posts.values())
+        results = [p for p in results if p.symbol == symbol]
+        results.sort(key=lambda p: p.created_at)
+        return results[:limit]
+
     def get_post(self, post_id: str) -> PostRecord | None:
         if self._in_transaction and post_id in self._temp_posts:
             return self._temp_posts[post_id]

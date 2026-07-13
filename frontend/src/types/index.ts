@@ -193,6 +193,15 @@ export interface MicroCapStatus {
   schedule: StrategySchedule | null
 }
 
+/** 内容扫描策略状态 -- GET /api/strategies/content-scan/status */
+export interface ContentScanStatus {
+  strategy: string
+  cron: string
+  type: string
+  config: { top_n: number }
+  schedule: StrategySchedule | null
+}
+
 /** 策略动作记录 -- 执行历史中的单个动作（决策层） */
 export interface StrategyActionRecord {
   id: string

@@ -3,7 +3,13 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from trading_service.api.deps import MartingaleDep, MartingaleShortDep, MicroCapDep, SchedulerDep
+from trading_service.api.deps import (
+    ContentScanDep,
+    MartingaleDep,
+    MartingaleShortDep,
+    MicroCapDep,
+    SchedulerDep,
+)
 
 router = APIRouter(tags=["strategies"])
 
@@ -99,6 +105,32 @@ async def get_martingale_short_status(
     """查看马丁做空策略状态（含调度信息）。"""
     status = strategy.get_status()
     status["schedule"] = scheduler.get_strategy_schedule("martingale_short")
+    return status
+
+
+@router.post("/content-scan/execute")
+async def execute_content_scan(
+    scheduler: SchedulerDep,
+) -> dict[str, Any]:
+    """执行内容扫描策略（选币 -> 信号检测 -> 写 content 动作 -> 触发贴文生成）。"""
+    execution_id, actions = await scheduler.execute_strategy_manually("content_scan")
+    return {
+        "status": "ok",
+        "strategy": "content_scan",
+        "execution_id": execution_id,
+        "actions": _format_actions(actions),
+        "action_count": len(actions),
+    }
+
+
+@router.get("/content-scan/status")
+async def get_content_scan_status(
+    strategy: ContentScanDep,
+    scheduler: SchedulerDep,
+) -> dict[str, Any]:
+    """查看内容扫描策略状态（含调度信息）。"""
+    status = strategy.get_status()
+    status["schedule"] = scheduler.get_strategy_schedule("content_scan")
     return status
 
 

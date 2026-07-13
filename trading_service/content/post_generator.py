@@ -188,23 +188,13 @@ class PostGenerator(IPostGenerator):
         logger.info(f"贴文已保存: {filepath}")
         return filepath
 
-    def _load_historical_posts(self, symbol: str) -> list[str]:
-        """读取该 symbol 的历史贴文正文。"""
-        if not self._posts_dir.exists():
-            return []
+    def _load_historical_posts(self, symbol: str) -> list[dict[str, str]]:
+        """读取该 symbol 的历史贴文（含时间），用于 prompt 上下文去重。
 
-        posts: list[str] = []
-        for filepath in sorted(self._posts_dir.glob(f"*_{symbol}.md")):
-            text = filepath.read_text(encoding="utf-8")
-            body = self._extract_post_body(text)
-            if body:
-                posts.append(body)
-        return posts
-
-    @staticmethod
-    def _extract_post_body(text: str) -> str:
-        """从贴文文件中提取正文（两个 --- 之间的内容）。"""
-        parts = text.split("---")
-        if len(parts) >= 3:
-            return parts[1].strip()
-        return ""
+        从数据库读取，返回 [{time, text}, ...]，按时间正序。
+        """
+        records = self._repo.list_posts_by_symbol(symbol)
+        return [
+            {"time": r.created_at.isoformat(), "text": r.post_text}
+            for r in records
+        ]

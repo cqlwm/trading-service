@@ -51,7 +51,7 @@ def make_content_action(
     )
 
 
-def _noop_load_posts(symbol: str) -> list[str]:
+def _noop_load_posts(symbol: str) -> list[dict[str, str]]:
     return []
 
 
@@ -156,11 +156,11 @@ class TestStyleHistoricalPosts:
 
         called_symbols: list[str] = []
 
-        def load_posts(symbol: str) -> list[str]:
+        def load_posts(symbol: str) -> list[dict[str, str]]:
             called_symbols.append(symbol)
-            return ["历史贴文内容"]
+            return [{"time": "2026-07-13T10:00:00+00:00", "text": "历史贴文内容"}]
 
         context = style.build_context(repo, [action], "exec001", load_posts)
 
         assert "BTCUSDT" in called_symbols
-        assert context["historical_posts"] == ["历史贴文内容"]
+        assert context["historical_posts"] == [{"time": "2026-07-13T10:00:00+00:00", "text": "历史贴文内容"}]

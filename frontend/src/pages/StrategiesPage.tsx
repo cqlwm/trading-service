@@ -12,6 +12,7 @@ import {
   useStopStrategySchedule,
 } from '@/hooks/useMutations'
 import {
+  useContentScanStatus,
   useMartingaleStatus,
   useMartingaleShortStatus,
   useMicroCapStatus,
@@ -110,9 +111,11 @@ export function StrategiesPage() {
   const martingale = useMartingaleStatus()
   const martingaleShort = useMartingaleShortStatus()
   const microCap = useMicroCapStatus()
+  const contentScan = useContentScanStatus()
   const executeMartingale = useExecuteStrategy('martingale')
   const executeMartingaleShort = useExecuteStrategy('martingale-short')
   const executeMicroCap = useExecuteStrategy('micro-cap')
+  const executeContentScan = useExecuteStrategy('content-scan')
   const startSchedule = useStartStrategySchedule()
   const stopSchedule = useStopStrategySchedule()
 
@@ -225,6 +228,34 @@ export function StrategiesPage() {
                 { label: '止损 (%)', value: `${microCap.data?.config.stop_loss_pct ?? 0}%` },
                 { label: '最低量', value: `$${(microCap.data?.config.min_volume_usdt ?? 0).toLocaleString()}` },
                 { label: '最大市值', value: `$${(microCap.data?.config.max_market_cap ?? 0).toLocaleString()}` },
+              ]}
+            />
+          }
+        />
+
+        {/* 内容扫描（纯内容型策略，不开仓，只产出信号+贴文） */}
+        <StrategyRow
+          historyName="content_scan"
+          onSelect={handleSelect}
+          card={
+            <StrategyCard
+              title="内容扫描"
+              description="涨幅榜选币 + 连续涨跌信号检测 + LLM 贴文生成"
+              isLoading={contentScan.isLoading}
+              isExecuting={executeContentScan.isPending}
+              onExecute={() => executeContentScan.mutate()}
+              schedule={contentScan.data?.schedule}
+              isStarting={startSchedule.isPending}
+              isStopping={stopSchedule.isPending}
+              onStart={() => startSchedule.mutate('content_scan')}
+              onStop={() => stopSchedule.mutate('content_scan')}
+              openPositions={0}
+              totalPositions={0}
+              maxPositions={0}
+              showPositions={false}
+              configItems={[
+                { label: '选币数量', value: contentScan.data?.config.top_n ?? 0 },
+                { label: '检测周期', value: '1d / 连续3根' },
               ]}
             />
           }

@@ -515,6 +515,18 @@ class SqlalchemyTradingStore(TradingRepository):
             models = result.scalars().all()
             return [self._post_model_to_record(m) for m in models]
 
+    def list_posts_by_symbol(self, symbol: str, limit: int = 50) -> list[PostRecord]:
+        with Session(self.engine) as session:
+            query = (
+                select(PostModel)
+                .where(PostModel.symbol == symbol)
+                .order_by(PostModel.created_at)
+                .limit(limit)
+            )
+            result = session.execute(query)
+            models = result.scalars().all()
+            return [self._post_model_to_record(m) for m in models]
+
     def get_post(self, post_id: str) -> PostRecord | None:
         with Session(self.engine) as session:
             model = session.get(PostModel, post_id)

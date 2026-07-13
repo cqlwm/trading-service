@@ -15,8 +15,7 @@ import pytest
 from trading_service.detectors.consecutive_candle import ConsecutiveCandleDetector
 from trading_service.exchange import MockExchange
 from trading_service.pickers import ISymbolPicker, SymbolInfo
-from trading_service.strategies.base import StrategyConfig
-from trading_service.strategies.content_scan import ContentScanStrategy
+from trading_service.strategies.content_scan import ContentScanConfig, ContentScanStrategy
 
 
 class FakePicker(ISymbolPicker):
@@ -64,7 +63,7 @@ def make_strategy(
     picker = FakePicker(picker_symbols or [])
     return ContentScanStrategy(
         exchange=exchange,
-        config=StrategyConfig(),
+        config=ContentScanConfig(),
         symbol_picker=picker,
         signal_detectors=[detector],
     )

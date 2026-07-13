@@ -279,6 +279,10 @@ class TradingRepository(ABC):
         """列出某次执行的所有贴文记录（按时间正序）。"""
 
     @abstractmethod
+    def list_posts_by_symbol(self, symbol: str, limit: int = 50) -> list[PostRecord]:
+        """列出某个币种的所有贴文记录（按时间正序）。"""
+
+    @abstractmethod
     def get_post(self, post_id: str) -> PostRecord | None:
         """根据 ID 获取贴文记录。"""
 

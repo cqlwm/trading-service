@@ -22,6 +22,8 @@ export const ENDPOINTS = {
   microCapExecute: '/strategies/micro-cap/execute',
   microCapStatus: '/strategies/micro-cap/status',
   microCapHistory: '/strategies/micro-cap/history',
+  contentScanExecute: '/strategies/content-scan/execute',
+  contentScanStatus: '/strategies/content-scan/status',
   // 调度控制
   strategyStart: (name: string) => `/strategies/${name}/start`,
   strategyStop: (name: string) => `/strategies/${name}/stop`,

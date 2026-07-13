@@ -93,6 +93,7 @@ export function StrategyCard({
   isStopping,
   onStart,
   onStop,
+  showPositions = true,
 }: {
   title: string
   description: string
@@ -108,6 +109,8 @@ export function StrategyCard({
   isStopping: boolean
   onStop: () => void
   onStart: () => void
+  /** 是否展示持仓统计区块（内容型策略不持仓，设为 false 隐藏）。默认 true。 */
+  showPositions?: boolean
 }) {
   const running = schedule?.running ?? false
 
@@ -162,27 +165,28 @@ export function StrategyCard({
           )}
         </div>
 
-        {/* 持仓统计 */}
-        {isLoading ? (
-          <Skeleton className="h-12" />
-        ) : (
-          <div className="flex items-center gap-4 rounded-md bg-muted/40 p-3">
-            <div>
-              <div className="text-xs text-muted-foreground">开仓中</div>
-              <div className="text-lg font-bold text-success tabular-nums">{openPositions}</div>
+        {/* 持仓统计（内容型策略不持仓，可隐藏） */}
+        {showPositions &&
+          (isLoading ? (
+            <Skeleton className="h-12" />
+          ) : (
+            <div className="flex items-center gap-4 rounded-md bg-muted/40 p-3">
+              <div>
+                <div className="text-xs text-muted-foreground">开仓中</div>
+                <div className="text-lg font-bold text-success tabular-nums">{openPositions}</div>
+              </div>
+              <div className="text-muted-foreground/40">/</div>
+              <div>
+                <div className="text-xs text-muted-foreground">总计</div>
+                <div className="text-lg font-bold tabular-nums">{totalPositions}</div>
+              </div>
+              <div className="ml-auto">
+                <Badge variant={openPositions >= maxPositions ? 'warning' : 'muted'}>
+                  上限 {maxPositions}
+                </Badge>
+              </div>
             </div>
-            <div className="text-muted-foreground/40">/</div>
-            <div>
-              <div className="text-xs text-muted-foreground">总计</div>
-              <div className="text-lg font-bold tabular-nums">{totalPositions}</div>
-            </div>
-            <div className="ml-auto">
-              <Badge variant={openPositions >= maxPositions ? 'warning' : 'muted'}>
-                上限 {maxPositions}
-              </Badge>
-            </div>
-          </div>
-        )}
+          ))}
 
         {/* 配置 */}
         <div className="flex-1 rounded-md border border-border p-3">

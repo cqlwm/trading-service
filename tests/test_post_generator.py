@@ -205,6 +205,47 @@ class TestPostGeneratorHistoricalPosts:
 
         assert "暂无历史贴文" in llm.prompts[0]
 
+    def test_historical_posts_include_timestamp(self, repo, posts_dir: Path) -> None:
+        """✅ 历史贴文应带时间信息，帮助 LLM 理解发布时间。"""
+        # 先生成一篇历史贴文（落库，含 created_at）
+        repo.save_action(make_action(symbol="BTCUSDT"))
+        llm1 = FakeLLMClient(response="第一次开仓贴文XYZ")
+        gen1 = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm1)
+        gen1.generate_for_execution("exec001")
+
+        # 再生成第二篇，prompt 应包含历史贴文的时间
+        repo.save_action(make_action(
+            symbol="BTCUSDT", action_type="add",
+            execution_id="exec002", reason_text="第 1 次加仓 @ 65500",
+        ))
+        llm2 = FakeLLMClient(response="加仓贴文")
+        gen2 = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm2)
+
+        gen2.generate_for_execution("exec002")
+
+        prompt = llm2.prompts[0]
+        # 提取历史贴文渲染区：从"该币种历史贴文"到下一个"## "标题
+        hist_start = prompt.find("该币种历史贴文")
+        next_section = prompt.find("\n## ", hist_start + 1)
+        hist_section = prompt[hist_start:next_section] if hist_start >= 0 else ""
+        assert "第一次开仓贴文XYZ" in hist_section, "历史贴文正文应在历史贴文区域"
+        assert "2026-" in hist_section, "历史贴文区域应带时间信息"
+
+    def test_load_historical_posts_returns_time_and_text(self, repo, posts_dir: Path) -> None:
+        """✅ _load_historical_posts 返回带时间戳的贴文列表。"""
+        repo.save_action(make_action(symbol="BTCUSDT"))
+        llm = FakeLLMClient(response="测试贴文")
+        gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
+        gen.generate_for_execution("exec001")
+
+        historical = gen._load_historical_posts("BTCUSDT")
+        assert len(historical) == 1, "应返回 1 篇历史贴文"
+        post = historical[0]
+        assert "time" in post, "每篇历史贴文应含 time 字段"
+        assert "text" in post, "每篇历史贴文应含 text 字段"
+        assert post["text"] == "测试贴文"
+        assert post["time"], "time 不应为空"
+
 
 def make_content_action(
     symbol: str = "BTCUSDT",

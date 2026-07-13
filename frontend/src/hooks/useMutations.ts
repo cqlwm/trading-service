@@ -30,17 +30,21 @@ export function useClosePosition() {
   })
 }
 
-/** 执行策略 -- 通用 mutation，支持 martingale / micro-cap / martingale-short */
-export function useExecuteStrategy(strategy: 'martingale' | 'micro-cap' | 'martingale-short') {
+/** 执行策略 -- 通用 mutation，支持 martingale / micro-cap / martingale-short / content-scan */
+export function useExecuteStrategy(
+  strategy: 'martingale' | 'micro-cap' | 'martingale-short' | 'content-scan',
+) {
   const qc = useQueryClient()
-  const endpoint =
-    strategy === 'martingale'
-      ? ENDPOINTS.martingaleExecute
-      : strategy === 'martingale-short'
-        ? ENDPOINTS.martingaleShortExecute
-        : ENDPOINTS.microCapExecute
-  const label =
-    strategy === 'martingale' ? '马丁' : strategy === 'martingale-short' ? '马丁做空' : '微市值'
+  const config: Record<
+    'martingale' | 'micro-cap' | 'martingale-short' | 'content-scan',
+    { endpoint: string; label: string }
+  > = {
+    martingale: { endpoint: ENDPOINTS.martingaleExecute, label: '马丁' },
+    'micro-cap': { endpoint: ENDPOINTS.microCapExecute, label: '微市值' },
+    'martingale-short': { endpoint: ENDPOINTS.martingaleShortExecute, label: '马丁做空' },
+    'content-scan': { endpoint: ENDPOINTS.contentScanExecute, label: '内容扫描' },
+  }
+  const { endpoint, label } = config[strategy]
 
   return useMutation<StrategyExecuteResponse, Error>({
     mutationFn: () => apiPost<StrategyExecuteResponse>(endpoint),

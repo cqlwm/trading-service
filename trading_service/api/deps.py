@@ -142,6 +142,11 @@ async def get_martingale_short_strategy() -> MartingaleShortStrategy:
     return _martingale_short_strategy
 
 
+async def get_content_scan_strategy() -> ContentScanStrategy:
+    """获取内容扫描策略实例。"""
+    return _content_scan_strategy
+
+
 def get_strategy_scheduler() -> StrategyScheduler:
     """获取策略调度器实例。"""
     return _strategy_scheduler
@@ -151,4 +156,5 @@ ExchangeDep = Annotated[MockExchange, Depends(get_exchange)]
 MartingaleDep = Annotated[MartingaleStrategy, Depends(get_martingale_strategy)]
 MicroCapDep = Annotated[MicroCapStrategy, Depends(get_micro_cap_strategy)]
 MartingaleShortDep = Annotated[MartingaleShortStrategy, Depends(get_martingale_short_strategy)]
+ContentScanDep = Annotated[ContentScanStrategy, Depends(get_content_scan_strategy)]
 SchedulerDep = Annotated[StrategyScheduler, Depends(get_strategy_scheduler)]

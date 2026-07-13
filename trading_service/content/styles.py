@@ -40,12 +40,12 @@ def _position_summary(p: Any) -> dict[str, Any]:
     }
 
 
-def _format_historical_posts(posts: list[str]) -> str:
-    """格式化历史贴文列表。"""
+def _format_historical_posts(posts: list[dict[str, str]]) -> str:
+    """格式化历史贴文列表（含发布时间）。"""
     if not posts:
         return "（暂无历史贴文）"
     return "\n\n---\n\n".join(
-        f"### 历史贴文 #{i + 1}\n{post}" for i, post in enumerate(posts)
+        f"### 历史贴文 #{i + 1}（{p["time"]}）\n{p["text"]}" for i, p in enumerate(posts)
     )
 
 
@@ -72,7 +72,7 @@ class PostStyle(ABC):
             repo: 数据仓库，用于拉取故事线/信号/持仓
             actions: 本次执行中该风格相关的动作记录
             execution_id: 执行轮次 ID
-            load_historical_posts: 回调函数 (symbol) -> list[str]，读取历史贴文正文
+            load_historical_posts: 回调函数 (symbol) -> list[dict]，读取历史贴文（含 time/text）
         """
         ...
 

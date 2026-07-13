@@ -34,11 +34,12 @@ class ContentScanStrategy(Strategy):
     def __init__(
         self,
         exchange: MockExchange,
-        config: StrategyConfig,
+        config: ContentScanConfig,
         symbol_picker: ISymbolPicker,
         signal_detectors: list[Any] | None = None,
     ) -> None:
         super().__init__(exchange, config, symbol_picker, signal_detectors)
+        self.config: ContentScanConfig = config
 
     async def execute(self, execution_id: str = "") -> list[StrategyAction]:
         """执行内容扫描：选币 -> 信号检测 -> 选 1 条 -> 写 content 动作。"""
@@ -82,4 +83,5 @@ class ContentScanStrategy(Strategy):
             "strategy": self.name,
             "cron": self.cron,
             "type": "content",
+            "config": {"top_n": self.config.top_n},
         }
