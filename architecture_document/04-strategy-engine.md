@@ -85,6 +85,7 @@ classDiagram
 
     Strategy <|-- MartingaleStrategy
     Strategy <|-- MicroCapStrategy
+    Strategy <|-- ContentScanStrategy
 
     StrategyConfig <|-- MartingaleConfig
     StrategyConfig <|-- MicroCapConfig
@@ -212,6 +213,11 @@ class ISymbolPicker(ABC):
 1. Alpha 代币，市值 5000 万 USDT 以下
 2. 在合约交易所存在且处于可交易状态（status=="TRADING", quoteAsset=="USDT"）
 
+> **市值口径**：`circulating_supply × 合约最新价（24h ticker last_price）`，而非直接用现货 `marketCap`。
+> 策略实际交易合约，合约价与现货价存在基差，故用合约价算市值更准确。
+> `circulating_supply` 缺失或合约价缺失时，降级用现货 `marketCap` 兜底。
+> 流程顺序：收集 Alpha 代币 -> 取与可交易合约的交集 -> 批量拉合约 ticker 取价 -> 算市值 -> 过滤 < 阈值（合约价依赖合约存在，故必须先取交集再算市值）。
+
 > MicroCapStrategy 通过 `SelectionPipeline(source=AlphaTokenSource(...), filters=[BullishKlineFilter(...), TechnicalAnalysisFilter(...)])`
 > 组合候选集构建与技术分析。MartingaleStrategy 直接用 `StaticListSymbolPicker`。
 
@@ -230,7 +236,10 @@ sequenceDiagram
     Pipeline->>Source: fetch()
     Source->>Binance: get_alpha_tokens() + get_future_exchange_info()
     Binance-->>Source: Alpha 代币 + 可交易合约
-    Source->>Source: 取交集 + 市值过滤
+    Source->>Source: 取交集
+    Source->>Binance: get_future_ticker_24hr()（批量取合约最新价）
+    Binance-->>Source: 合约 24h ticker
+    Source->>Source: circulating_supply × 合约价 = 市值，过滤 < 5000万
     Source-->>Pipeline: list[SymbolInfo]（基础字段）
     Pipeline->>BullishFilter: apply(infos)
     loop 每个 SymbolInfo
@@ -621,3 +630,69 @@ if position.pnl_pct(current_price) < -20.0:  # 亏损超 20%
         reason_data={"action": "stop_loss", "price": current_price, "loss_pct": 20.0},
     )
 ```
+
+---
+
+## 11. 贴文自动生成
+
+### 11.1 接口架构
+
+贴文生成采用接口 + 可插拔风格模式：
+
+```
+IPostGenerator (ABC)
+  └─ generate_for_execution(execution_id) -> list[Path]
+
+PostGenerator (IPostGenerator)
+  ├─ 共享基础设施：LLM 调用 / 文件保存 / 历史贴文加载
+  ├─ _styles: dict[str, PostStyle]  ← 按 action_type 分发
+  └─ generate_for_execution():
+       读 actions -> 按 action_type 选 style
+       -> style.build_context() -> style.build_prompt()
+       -> _call_llm() -> _save_post()
+
+PostStyle (ABC)
+  ├─ action_type: str                    ← 匹配标识
+  ├─ build_context(repo, actions, ...)   ← 构建上下文
+  └─ build_prompt(context)               ← 构建 LLM prompt
+```
+
+### 11.2 两种 PostStyle
+
+| 风格 | action_type | 上下文 | prompt 角色 | 触发策略 |
+|------|------------|--------|------------|---------|
+| `TradingPostStyle` | "trading" | 交易故事线 + 持仓 + 历史贴文 | 交易员 | 马丁做空等（open/add/close） |
+| `ContentPostStyle` | "content" | 信号详情 + 历史贴文 | 市场观察者 | ContentScanStrategy（content） |
+
+加新风格只需继承 `PostStyle`，实现 `action_type`/`build_context`/`build_prompt`，构造时传入 `styles=[...]`。
+
+### 11.3 触发机制
+
+```
+策略执行完成（定时 _execute_strategy / 手动 execute_strategy_manually）
+  └─ actions 非空？
+     ├─ 否 -> 跳过
+     └─ 是 -> post_generator.generate_for_execution(execution_id)
+        （try/except 包裹，失败不影响策略执行）
+```
+
+两条执行路径（定时 + 手动）都接入了贴文生成。
+
+### 11.4 内容型策略 ContentScanStrategy
+
+每 10 分钟从涨幅榜选币，检测连续涨跌K线，选 1 条生成贴文：
+
+```
+ContentScanStrategy.execute()
+  ├─ 1. 选币：TopGainersSource（24h ticker 涨幅榜 top 20）
+  ├─ 2. 信号检测：ConsecutiveCandleDetector（拉 1d K 线，连续涨/跌 >= 3 天）
+  ├─ 3. run_detectors -> 信号落盘到 trading_signals
+  ├─ 4. 选 severity 最高的 1 条信号
+  ├─ 5. 写 action_type="content" 动作记录（含 signal_ids）
+  └─ 6. 返回 [StrategyAction(type="content")]
+     -> scheduler 检测到 actions 非空 -> 触发 PostGenerator
+     -> PostGenerator 检测到 content 类型 -> 走 ContentPostStyle
+     -> 市场观察者角色 prompt -> LLM 生成贴文
+```
+
+不开仓、不平仓，纯内容产出。

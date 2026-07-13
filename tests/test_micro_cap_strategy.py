@@ -51,9 +51,10 @@ def make_info(
     is_sideways_bottom: bool = False,
     sma_200: float | None = None,
     price_vs_sma200_percent: float | None = None,
+    market_cap: float = 0.0,
 ) -> SymbolInfo:
     cross_str = cross_signal.value if cross_signal else None
-    info = SymbolInfo(symbol=symbol)
+    info = SymbolInfo(symbol=symbol, market_cap=market_cap)
     info.klines["4h"] = _make_klines_df(
         cross_signal=cross_str,
         sma_200=sma_200,
@@ -263,3 +264,62 @@ class TestMicroCapStatus:
 
         assert status["open_positions"] == 0
         assert status["total_positions"] == 0
+
+
+class TestMicroCapMarketCapSnapshot:
+    """market_cap 快照流转：选币 -> 信号 metadata -> 开仓存入 Position。"""
+
+    @pytest.mark.asyncio
+    async def test_signal_metadata_carries_market_cap(self, exchange: MockExchange) -> None:
+        """正常路径：选币的 market_cap 应注入到落盘信号的 metadata。"""
+        strategy = make_strategy(exchange, [
+            make_info("ABCUSDT", cross_signal=CrossSignalType.GOLDEN,
+                      sma_200=1.0, price_vs_sma200_percent=2.0,
+                      market_cap=30_000_000.0),
+        ])
+        exchange.fetch_prices = AsyncMock(return_value={"ABCUSDT": 1.0})  # type: ignore
+
+        await strategy.execute()
+
+        signals = exchange.db.list_signals(signal_type="golden_cross")
+        assert len(signals) == 1
+        assert signals[0].metadata_json.get("market_cap") == 30_000_000.0, \
+            "信号 metadata 应携带选币时的 market_cap 快照"
+
+    @pytest.mark.asyncio
+    async def test_open_position_stores_market_cap_snapshot(
+        self, exchange: MockExchange
+    ) -> None:
+        """正常路径：开仓时从信号取出 market_cap 快照存入 Position。"""
+        strategy = make_strategy(exchange, [
+            make_info("ABCUSDT", cross_signal=CrossSignalType.GOLDEN,
+                      sma_200=1.0, price_vs_sma200_percent=2.0,
+                      market_cap=42_500_000.0),
+        ])
+        exchange.fetch_prices = AsyncMock(return_value={"ABCUSDT": 1.0})  # type: ignore
+
+        await strategy.execute()
+
+        positions = exchange.get_positions(tag="micro_cap")
+        assert len(positions) == 1
+        assert positions[0].market_cap == 42_500_000.0, \
+            f"持仓应存入 market_cap 快照 4250万，实际 {positions[0].market_cap}"
+
+    @pytest.mark.asyncio
+    async def test_default_market_cap_when_not_in_signal(
+        self, exchange: MockExchange
+    ) -> None:
+        """向后兼容：信号无 market_cap -> Position.market_cap 默认 0.0。"""
+        # market_cap=0.0（默认）-> 信号 metadata 无 market_cap -> 开仓默认 0.0
+        strategy = make_strategy(exchange, [
+            make_info("ABCUSDT", cross_signal=CrossSignalType.GOLDEN,
+                      sma_200=1.0, price_vs_sma200_percent=2.0,
+                      market_cap=0.0),
+        ])
+        exchange.fetch_prices = AsyncMock(return_value={"ABCUSDT": 1.0})  # type: ignore
+
+        await strategy.execute()
+
+        positions = exchange.get_positions(tag="micro_cap")
+        assert len(positions) == 1
+        assert positions[0].market_cap == 0.0, "无市值信息时默认 0.0"

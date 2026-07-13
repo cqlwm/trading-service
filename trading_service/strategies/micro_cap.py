@@ -85,6 +85,9 @@ class MicroCapStrategy(Strategy):
         for signal in candidate_signals[:slots]:
             price = prices.get(signal.symbol, 0.0)
             if price > 0:
+                # 取出选币时定格的市值快照（由 run_detectors 注入信号 metadata）
+                cap_raw = signal.metadata_json.get("market_cap", 0.0)
+                market_cap = float(cap_raw) if isinstance(cap_raw, (int, float)) else 0.0
                 self.exchange.open_position(
                     symbol=signal.symbol,
                     direction=TradeDirection.LONG,
@@ -100,6 +103,7 @@ class MicroCapStrategy(Strategy):
                     },
                     signal_ids=[signal.id],
                     execution_id=execution_id,
+                    market_cap=market_cap,
                 )
                 actions.append(StrategyAction(
                     type="open",

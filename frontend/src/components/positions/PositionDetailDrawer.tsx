@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useClosePosition } from '@/hooks/useMutations'
 import { usePosition } from '@/hooks/usePosition'
-import { formatDateTime, formatPrice, formatSize } from '@/lib/format'
+import { formatDateTime, formatMarketCap, formatPrice, formatSize } from '@/lib/format'
 import type { PositionListItem } from '@/types'
 
 /** 详情字段行 */
@@ -70,6 +70,7 @@ export function PositionDetailDrawer({
                 <Field label="持仓数量">{formatSize(position.total_size)}</Field>
                 <Field label="层数">{position.layers}</Field>
                 <Field label="止盈触发">{position.tp_hit} 次</Field>
+                <Field label="市值">{formatMarketCap(position.market_cap)}</Field>
                 <Field label="标签">{position.tag}</Field>
                 {listData && (
                   <Field label="当前价">{formatPrice(listData.current_price)}</Field>

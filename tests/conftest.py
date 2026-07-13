@@ -9,6 +9,7 @@ from trading_service.exchange import MockExchange
 from trading_service.repository import (
     OrderRecord,
     PositionRecord,
+    PostRecord,
     SignalRecord,
     StrategyActionRecord,
     StrategyExecutionRecord,
@@ -55,10 +56,12 @@ class InMemoryTradingRepository(TradingRepository):
         self.orders: dict[str, OrderRecord] = {}
         self.signals: dict[str, SignalRecord] = {}
         self.actions: dict[str, StrategyActionRecord] = {}
+        self.posts: dict[str, PostRecord] = {}
         self._in_transaction = False
         self._temp_positions: dict[str, PositionRecord] = {}
         self._temp_orders: dict[str, OrderRecord] = {}
         self._temp_actions: dict[str, StrategyActionRecord] = {}
+        self._temp_posts: dict[str, PostRecord] = {}
 
     def _new_id(self) -> str:
         return uuid.uuid4().hex[:12]
@@ -68,16 +71,19 @@ class InMemoryTradingRepository(TradingRepository):
         self._temp_positions = {}
         self._temp_orders = {}
         self._temp_actions = {}
+        self._temp_posts = {}
 
     def commit(self) -> None:
         if self._in_transaction:
             self.positions.update(self._temp_positions)
             self.orders.update(self._temp_orders)
             self.actions.update(self._temp_actions)
+            self.posts.update(self._temp_posts)
             self._in_transaction = False
             self._temp_positions = {}
             self._temp_orders = {}
             self._temp_actions = {}
+            self._temp_posts = {}
 
     def rollback(self) -> None:
         if self._in_transaction:
@@ -85,6 +91,7 @@ class InMemoryTradingRepository(TradingRepository):
             self._temp_positions = {}
             self._temp_orders = {}
             self._temp_actions = {}
+            self._temp_posts = {}
 
     def save_position(self, position: PositionRecord) -> None:
         if self._in_transaction:
@@ -293,6 +300,25 @@ class InMemoryTradingRepository(TradingRepository):
         results = [a for a in self.actions.values() if a.symbol == symbol]
         results.sort(key=lambda a: a.created_at)
         return results[:limit]
+
+    def save_post(self, post: PostRecord) -> None:
+        if self._in_transaction:
+            self._temp_posts[post.id] = post
+        else:
+            self.posts[post.id] = post
+
+    def list_posts_by_execution(self, execution_id: str) -> list[PostRecord]:
+        results = list(self.posts.values())
+        if self._in_transaction:
+            results = results + list(self._temp_posts.values())
+        results = [p for p in results if p.execution_id == execution_id]
+        results.sort(key=lambda p: p.created_at)
+        return results
+
+    def get_post(self, post_id: str) -> PostRecord | None:
+        if self._in_transaction and post_id in self._temp_posts:
+            return self._temp_posts[post_id]
+        return self.posts.get(post_id)
 
 
 @pytest.fixture

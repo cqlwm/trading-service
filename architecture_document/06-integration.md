@@ -116,7 +116,10 @@ sequenceDiagram
     Pipeline->>Source: fetch()
     Source->>Binance: get_alpha_tokens() + get_future_exchange_info()
     Binance-->>Source: Alpha 代币 + 可交易合约
-    Source->>Source: 取交集 + 市值 < 5000万 过滤
+    Source->>Source: 取交集
+    Source->>Binance: get_future_ticker_24hr()（批量取合约最新价）
+    Binance-->>Source: 合约 24h ticker
+    Source->>Source: circulating_supply × 合约价 = 市值，过滤 < 5000万
     Source-->>Pipeline: list[SymbolInfo]（基础字段）
     Pipeline->>BullishFilter: apply(infos)
     BullishFilter->>Binance: get_future_klines(symbol, "1d", 5)

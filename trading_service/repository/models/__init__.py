@@ -5,6 +5,7 @@ from trading_service.repository.models.action import StrategyActionModel
 from trading_service.repository.models.order import OrderModel
 from trading_service.repository.models.position import PositionModel
 from trading_service.repository.models.signal import SignalModel
+from trading_service.repository.models.post import PostModel
 from trading_service.repository.models.schedule import (
     StrategyExecutionModel,
     StrategyScheduleModel,
@@ -15,6 +16,7 @@ __all__ = [
     "PositionModel",
     "OrderModel",
     "SignalModel",
+    "PostModel",
     "StrategyScheduleModel",
     "StrategyExecutionModel",
     "StrategyActionModel",

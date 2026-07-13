@@ -10,7 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/Table'
-import { formatDateTime, formatPrice, formatSize } from '@/lib/format'
+import { formatDateTime, formatMarketCap, formatPrice, formatSize } from '@/lib/format'
 import { isPlaceholderPrice } from '@/lib/format'
 import type { PositionListItem } from '@/types'
 
@@ -30,6 +30,7 @@ export function PositionTable({
           <TableHead>方向</TableHead>
           <TableHead className="text-right">开仓价</TableHead>
           <TableHead className="text-right">当前价</TableHead>
+          <TableHead className="text-right">市值</TableHead>
           <TableHead className="text-right">数量</TableHead>
           <TableHead className="text-center">层数</TableHead>
           <TableHead className="text-center">止盈</TableHead>
@@ -57,6 +58,9 @@ export function PositionTable({
               </TableCell>
               <TableCell className="text-right tabular-nums">
                 <PriceDisplay value={p.current_price} placeholder={priceUnavailable} />
+              </TableCell>
+              <TableCell className="text-right tabular-nums text-muted-foreground">
+                {formatMarketCap(p.market_cap)}
               </TableCell>
               <TableCell className="text-right tabular-nums">
                 {formatSize(p.total_size)}

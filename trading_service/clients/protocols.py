@@ -5,7 +5,7 @@
 
 BinanceClient 在结构上满足这些协议，无需显式继承（Protocol 是结构化类型）。
 按消费者实际需要拆分协议：
-- AlphaTokenSource 只需 AlphaUniverseClient（Alpha 代币 + 交易所信息）
+- AlphaTokenSource 只需 AlphaUniverseClient（Alpha 代币 + 交易所信息 + 合约行情）
 - TechnicalAnalysisFilter 只需 KlineClient（K 线拉取）
 - MarketDataClient 是两者的超集，供需要全部能力的消费者使用。
 """
@@ -17,6 +17,7 @@ from trading_service.clients.binance_client import (
     BinanceAlphaToken,
     BinanceFutureExchangeInfo,
     BinanceFutureKline,
+    BinanceFutureTicker24hr,
 )
 
 
@@ -33,7 +34,10 @@ class KlineClient(Protocol):
 
 @runtime_checkable
 class AlphaUniverseClient(Protocol):
-    """Alpha 宇宙客户端协议：Alpha 代币列表 + 交易所信息（AlphaTokenSource 依赖）。"""
+    """Alpha 宇宙客户端协议：Alpha 代币列表 + 交易所信息 + 合约行情（AlphaTokenSource 依赖）。
+
+    市值 = circulating_supply × 合约最新价，故需 get_future_ticker_24hr 取合约价。
+    """
 
     def get_alpha_tokens(self) -> list[BinanceAlphaToken]:
         """获取 Alpha 代币列表。"""
@@ -41,6 +45,10 @@ class AlphaUniverseClient(Protocol):
 
     def get_future_exchange_info(self) -> BinanceFutureExchangeInfo:
         """获取合约交易所信息（含可交易交易对）。"""
+        ...
+
+    def get_future_ticker_24hr(self, symbol: str | None = None) -> list[BinanceFutureTicker24hr]:
+        """获取合约 24 小时行情（不传 symbol 返回全部，用于批量取最新价）。"""
         ...
 
 

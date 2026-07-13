@@ -280,3 +280,115 @@ class TestPostGeneratorContentPath:
         gen.generate_for_execution("exec_content_001")
 
         assert "consecutive_rise" in llm.prompts[0], "prompt 应包含信号类型"
+
+
+class TestPostGeneratorPersistence:
+    """贴文持久化测试：生成贴文后应落库到 trading_posts。"""
+
+    def test_trading_post_persisted_to_db(self, repo, posts_dir: Path) -> None:
+        """✅ 交易型贴文生成后落库，含 prompt 和 post_text。"""
+        repo.save_action(make_action(symbol="BTCUSDT"))
+        llm = FakeLLMClient(response="BTC 做空入场！")
+        gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
+
+        gen.generate_for_execution("exec001")
+
+        posts = repo.list_posts_by_execution("exec001")
+        assert len(posts) == 1, f"应落库 1 条贴文，实际 {len(posts)}"
+        post = posts[0]
+        assert post.execution_id == "exec001", f"execution_id 应为 exec001，实际 {post.execution_id}"
+        assert post.symbol == "BTCUSDT", f"symbol 应为 BTCUSDT，实际 {post.symbol}"
+        assert post.post_text == "BTC 做空入场！", "post_text 应为 LLM 返回的正文"
+        assert post.prompt, "prompt 不应为空"
+        assert "交易员" in post.prompt, f"trading prompt 应含交易员角色，实际: {post.prompt[:50]}"
+        assert post.style == "trading", f"style 应为 trading，实际 {post.style}"
+        assert post.action_type == "open", f"action_type 应为 open，实际 {post.action_type}"
+        assert post.strategy_name == "martingale_short"
+
+    def test_content_post_persisted_to_db(self, repo, posts_dir: Path) -> None:
+        """✅ 内容型贴文生成后落库，含 prompt 和 post_text。"""
+        from trading_service.repository.abc import SignalRecord
+        repo.save_signal(SignalRecord(
+            id="sig001", symbol="BTCUSDT", signal_type="consecutive_rise",
+            direction="bullish", severity=3, description="BTCUSDT 连续 3 天上涨",
+            metadata_json={"streak_days": 3},
+        ))
+        repo.save_action(make_content_action(symbol="BTCUSDT", signal_id="sig001"))
+        llm = FakeLLMClient(response="BTC 连涨3天！")
+        gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
+
+        gen.generate_for_execution("exec_content_001")
+
+        posts = repo.list_posts_by_execution("exec_content_001")
+        assert len(posts) == 1, f"应落库 1 条贴文，实际 {len(posts)}"
+        post = posts[0]
+        assert post.post_text == "BTC 连涨3天！"
+        assert post.prompt, "prompt 不应为空"
+        assert "市场观察者" in post.prompt, f"content prompt 应含市场观察者角色"
+        assert post.style == "content", f"style 应为 content，实际 {post.style}"
+        assert post.action_type == "content", f"action_type 应为 content，实际 {post.action_type}"
+        assert post.strategy_name == "content_scan"
+
+    def test_prompt_is_complete_llm_input(self, repo, posts_dir: Path) -> None:
+        """✅ 落库的 prompt 应是发给 LLM 的完整提示词（与 FakeLLMClient 记录的一致）。"""
+        repo.save_action(make_action(symbol="BTCUSDT"))
+        llm = FakeLLMClient(response="贴文正文")
+        gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
+
+        gen.generate_for_execution("exec001")
+
+        posts = repo.list_posts_by_execution("exec001")
+        assert len(posts) == 1
+        # FakeLLMClient 记录的 prompt 应与落库的 prompt 完全一致
+        assert len(llm.prompts) == 1
+        assert posts[0].prompt == llm.prompts[0], "落库的 prompt 应与发给 LLM 的 prompt 一致"
+
+    def test_multiple_symbols_each_persisted(self, repo, posts_dir: Path) -> None:
+        """✅ 多 symbol 分组 -> 每个落库一条 PostRecord。"""
+        repo.save_action(make_action(symbol="BTCUSDT"))
+        repo.save_action(make_action(symbol="ETHUSDT", reason_text="开仓 @ 3000"))
+        llm = FakeLLMClient(response="贴文")
+        gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
+
+        gen.generate_for_execution("exec001")
+
+        posts = repo.list_posts_by_execution("exec001")
+        assert len(posts) == 2, f"应落库 2 条贴文，实际 {len(posts)}"
+        symbols = {p.symbol for p in posts}
+        assert symbols == {"BTCUSDT", "ETHUSDT"}
+
+    def test_llm_failure_no_post_persisted(self, repo, posts_dir: Path) -> None:
+        """✅ LLM 调用失败 -> 不落库贴文。"""
+        repo.save_action(make_action())
+        llm = FakeLLMClient(should_fail=True)
+        gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
+
+        gen.generate_for_execution("exec001")
+
+        posts = repo.list_posts_by_execution("exec001")
+        assert len(posts) == 0, "LLM 失败时不应落库贴文"
+
+    def test_no_llm_client_no_post_persisted(self, repo, posts_dir: Path) -> None:
+        """✅ 无 LLM client -> 不落库贴文。"""
+        repo.save_action(make_action())
+        gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=None)
+
+        gen.generate_for_execution("exec001")
+
+        posts = repo.list_posts_by_execution("exec001")
+        assert len(posts) == 0, "无 LLM client 时不应落库贴文"
+
+    def test_get_post_by_id(self, repo, posts_dir: Path) -> None:
+        """✅ 落库后可通过 get_post(id) 查询单条。"""
+        repo.save_action(make_action(symbol="BTCUSDT"))
+        llm = FakeLLMClient(response="贴文正文")
+        gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
+
+        gen.generate_for_execution("exec001")
+
+        posts = repo.list_posts_by_execution("exec001")
+        assert len(posts) == 1
+        fetched = repo.get_post(posts[0].id)
+        assert fetched is not None, "get_post 应返回已落库的贴文"
+        assert fetched.post_text == "贴文正文"
+        assert fetched.prompt == posts[0].prompt

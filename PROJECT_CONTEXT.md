@@ -59,8 +59,10 @@ trading_service/
 │
 ├── exchange.py        # Mock交易所实现（开仓/加仓/平仓 均写入动作记录）
 ├── scheduler.py       # 策略调度器（统一管理策略定时调度，执行后可选触发贴文生成）
-├── content/           # 内容生成模块
-│   └── post_generator.py        # PostGenerator（LLM 生成交易贴文，保存到 mydata/posts/）
+├── content/           # 内容生成模块（IPostGenerator 接口 + 可插拔 PostStyle）
+│   ├── post_generator.py        # IPostGenerator ABC + PostGenerator 实现（共享 LLM/保存/历史贴文）
+│   ├── styles.py                # PostStyle ABC + TradingPostStyle + ContentPostStyle（上下文+prompt 构建）
+│   └── llm_client.py            # LLMClient Protocol + create_openai_client 工厂
 └── config.py
 
 frontend/              # ✅ 前端独立项目（React 19 + Vite 8 + TS + TanStack Query）
@@ -78,7 +80,8 @@ demo/                   # 展示/运维脚本（不进 pyright/测试）
 ├── demo_picker.py               # 基础选币演示
 ├── demo_technical_picker.py     # 技术分析选币（含下架预警展示）
 ├── demo_backtest.py             # 止盈率回测（资金约束，日级调度）
-└── demo_take_profit.py          # 为真实持仓批量下限价止盈单（ccxt鉴权，真实资金）
+├── demo_take_profit.py          # 为真实持仓批量下限价止盈单（ccxt鉴权，真实资金）
+└── demo_post_generation.py      # 贴文生成演示（构造交易故事线调用真实 LLM）
 
 # -----------------------
 # 🔗 接口契约（CRITICAL!）
@@ -195,17 +198,21 @@ SignalRecord    ->    StrategyActionRecord  ->   OrderRecord
 - **订单**：纯交易事实（不含 reason，reason 已移至动作记录）
 - **故事线**：`list_actions_by_position` / `list_actions_by_symbol` 按时间正序返回完整交易故事
 
-## 贴文自动生成（2026-07-11 新增）
-- 策略执行后有仓位变动（open/add/close）时，自动触发 `PostGenerator.generate_for_execution(execution_id)`
-- 贴文生成在 scheduler._execute_strategy 中 try/except 包裹，失败不影响策略执行
-- 上下文（全量提交 LLM，让它自己选素材）：本次动作 + 该 symbol 完整故事线 + 历史贴文 + 当前持仓
+## 贴文自动生成（2026-07-11 新增，2026-07-12 接口化重构）
+- **接口架构**：`IPostGenerator` (ABC) -> `PostGenerator` 实现 -> 按 action_type 分发到 `PostStyle`
+  - `IPostGenerator.generate_for_execution(execution_id)` 是唯一契约，scheduler 依赖此接口
+  - `PostGenerator` 持有共享基础设施（LLM 调用、文件保存、历史贴文加载）
+  - `PostStyle` (ABC) 负责上下文构建 + prompt 构建，加新风格只需继承并注册
+- **两种 PostStyle**（按 action_type 自动分发）：
+  - `TradingPostStyle`（action_type="trading"）：交易故事线上下文 + 交易员角色 prompt
+  - `ContentPostStyle`（action_type="content"）：信号上下文 + 市场观察者角色 prompt
+- **扩展方式**：继承 `PostStyle`，实现 `action_type`/`build_context`/`build_prompt`，构造 `PostGenerator` 时传入 `styles=[...]`
+- 策略执行后有动作（定时/手动两条路径都接入）时自动触发
+- 贴文生成在 scheduler 中 try/except 包裹，失败不影响策略执行
 - 历史贴文作为去重参考：LLM 知道之前发过什么，避免重复
 - LLM：OpenAI 兼容 API（openai SDK），config 中 `llm_base_url` / `llm_api_key` / `llm_model` 配置
 - 贴文保存：`~/projects/mydata/posts/{timestamp}_{symbol}.md`，含正文 + 动作附录
 - `posts_enabled` 总开关，`llm_api_key` 为空时 PostGenerator 为 None，自动跳过
-- **两条贴文路径**（PostGenerator 自动分流）：
-  - 交易型（马丁做空等）：action_type=open/add/close -> 交易故事线上下文 -> 交易员角色 prompt
-  - 内容型（content_scan）：action_type=content -> 信号上下文 -> 市场观察者角色 prompt
 - **内容型策略 ContentScanStrategy**（每 10 分钟）：
   - 选币：TopGainersSource（24h ticker 涨幅榜 top 20）
   - 信号检测：ConsecutiveCandleDetector（拉 1d K 线，检测连续涨/跌天数 >= 3）

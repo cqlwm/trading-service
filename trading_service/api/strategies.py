@@ -142,6 +142,63 @@ async def get_strategy_schedule(
     return schedule
 
 
+@router.get("/{strategy_name}/executions/{execution_id}")
+async def get_execution_detail(
+    strategy_name: str,
+    execution_id: str,
+    scheduler: SchedulerDep,
+) -> dict[str, Any]:
+    """查看单次策略执行详情（含动作记录和生成的贴文）。"""
+    executions = scheduler.list_executions(strategy_name, limit=1000)
+    execution = next((e for e in executions if e.id == execution_id), None)
+    if execution is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"执行记录不存在: {execution_id}",
+        )
+
+    actions = scheduler.list_actions_by_execution(execution_id)
+    posts = scheduler.list_posts_by_execution(execution_id)
+
+    return {
+        "id": execution.id,
+        "strategy_name": execution.strategy_name,
+        "started_at": execution.started_at.isoformat(),
+        "finished_at": execution.finished_at.isoformat() if execution.finished_at else None,
+        "success": execution.success,
+        "action_count": execution.action_count,
+        "error": execution.error,
+        "actions": [
+            {
+                "id": a.id,
+                "action_type": a.action_type,
+                "symbol": a.symbol,
+                "position_id": a.position_id,
+                "order_id": a.order_id,
+                "reason": a.reason_text,
+                "reason_data": a.reason_data,
+                "signal_ids": a.signal_ids,
+                "created_at": a.created_at.isoformat(),
+            }
+            for a in actions
+        ],
+        "posts": [
+            {
+                "id": p.id,
+                "execution_id": p.execution_id,
+                "action_type": p.action_type,
+                "symbol": p.symbol,
+                "strategy_name": p.strategy_name,
+                "style": p.style,
+                "prompt": p.prompt,
+                "post_text": p.post_text,
+                "created_at": p.created_at.isoformat(),
+            }
+            for p in posts
+        ],
+    }
+
+
 @router.get("/{strategy_name}/executions")
 async def get_strategy_executions(
     strategy_name: str,

@@ -1,6 +1,8 @@
 import { Activity, History } from 'lucide-react'
+import { useState } from 'react'
 
 import { StrategyCard } from '@/components/strategies/StrategyCard'
+import { ExecutionDetailDrawer } from '@/components/strategies/ExecutionDetailDrawer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/Badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -20,7 +22,13 @@ import { cn } from '@/lib/cn'
 import type { ReactNode } from 'react'
 
 /** 执行历史面板（右栏） */
-function ExecutionHistoryPanel({ name }: { name: string }) {
+function ExecutionHistoryPanel({
+  name,
+  onSelect,
+}: {
+  name: string
+  onSelect: (executionId: string, strategyName: string) => void
+}) {
   const { data: executions, isLoading } = useStrategyExecutions(name, 10)
 
   return (
@@ -43,7 +51,8 @@ function ExecutionHistoryPanel({ name }: { name: string }) {
               {(executions ?? []).map((exec) => (
                 <div
                   key={exec.id}
-                  className="flex items-center gap-2 rounded-md border border-border/60 p-1.5 text-sm"
+                  onClick={() => onSelect(exec.id, exec.strategy_name)}
+                  className="flex cursor-pointer items-center gap-2 rounded-md border border-border/60 p-1.5 text-sm transition-colors hover:bg-accent"
                 >
                   <span
                     className={cn(
@@ -81,15 +90,17 @@ function ExecutionHistoryPanel({ name }: { name: string }) {
 function StrategyRow({
   card,
   historyName,
+  onSelect,
 }: {
   card: ReactNode
   historyName: string
+  onSelect: (executionId: string, strategyName: string) => void
 }) {
   return (
     <div className="grid items-stretch gap-4 lg:grid-cols-5">
       <div className="lg:col-span-3">{card}</div>
       <div className="lg:col-span-2">
-        <ExecutionHistoryPanel name={historyName} />
+        <ExecutionHistoryPanel name={historyName} onSelect={onSelect} />
       </div>
     </div>
   )
@@ -104,6 +115,15 @@ export function StrategiesPage() {
   const executeMicroCap = useExecuteStrategy('micro-cap')
   const startSchedule = useStartStrategySchedule()
   const stopSchedule = useStopStrategySchedule()
+
+  const [selectedExecution, setSelectedExecution] = useState<{
+    id: string
+    name: string
+  } | null>(null)
+
+  const handleSelect = (executionId: string, strategyName: string) => {
+    setSelectedExecution({ id: executionId, name: strategyName })
+  }
 
   return (
     <div>
@@ -121,6 +141,7 @@ export function StrategiesPage() {
         {/* 马丁做多 */}
         <StrategyRow
           historyName="martingale"
+          onSelect={handleSelect}
           card={
             <StrategyCard
               title="马丁格尔"
@@ -151,6 +172,7 @@ export function StrategiesPage() {
         {/* 马丁做空 */}
         <StrategyRow
           historyName="martingale_short"
+          onSelect={handleSelect}
           card={
             <StrategyCard
               title="马丁做空"
@@ -181,6 +203,7 @@ export function StrategiesPage() {
         {/* 微市值 */}
         <StrategyRow
           historyName="micro_cap"
+          onSelect={handleSelect}
           card={
             <StrategyCard
               title="微市值"
@@ -207,6 +230,12 @@ export function StrategiesPage() {
           }
         />
       </div>
+
+      <ExecutionDetailDrawer
+        executionId={selectedExecution?.id ?? null}
+        strategyName={selectedExecution?.name ?? ''}
+        onClose={() => setSelectedExecution(null)}
+      />
     </div>
   )
 }

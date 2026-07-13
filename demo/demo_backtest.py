@@ -174,7 +174,8 @@ def run_backtest(
             kdate = datetime.fromtimestamp(kline.open_time / 1000, tz=timezone.utc)
             if kdate < window_start or kdate > window_end:
                 continue
-            # 用当前流通量 × 当日收盘价近似历史市值
+            # 用当前流通量 × 当日合约收盘价近似历史市值
+            # （流通量无历史数据，K 线为合约 K 线，故为合约口径，与线上选币一致）
             if circ_supply * kline.close_price_float >= AlphaTokenSource.MARKET_CAP_THRESHOLD:
                 continue
             signal = detect_signals_for_date(analyzer, klines, kdate)
@@ -222,7 +223,7 @@ def print_results(
     print(f"⏱️   耗时: {duration:.1f} 秒")
     print()
     print("⚠️ 偏差声明:")
-    print("  - 市值用「当前流通量 × 历史价格」近似（流通量无历史数据）")
+    print("  - 市值用「当前流通量 × 历史合约收盘价」近似（流通量无历史数据）")
     print("  - Alpha 代币身份用当前列表，存在前视偏差")
     print("  - 已下架且 K 线丢失的代币无法覆盖（生存者偏差）")
     print("  - 下架清算价用下架日收盘价近似（实际为结算价）")

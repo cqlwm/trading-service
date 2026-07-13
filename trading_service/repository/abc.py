@@ -20,6 +20,7 @@ class PositionRecord:
     exit_price: float | None = None
     tag: str = ""
     tp_hit: int = 0
+    market_cap: float = 0.0  # 开仓时定格的代币市值快照（合约口径）
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     closed_at: datetime | None = None
 
@@ -88,13 +89,33 @@ class StrategyActionRecord:
     id: str
     execution_id: str = ""
     strategy_name: str = ""
-    action_type: str = ""  # "open" | "add" | "close" | "skip"
+    action_type: str = ""  # "open" | "add" | "close" | "skip" | "content"
     symbol: str = ""
     position_id: str = ""
     order_id: str = ""
     reason_text: str = ""
     reason_data: dict[str, object] = field(default_factory=dict)
     signal_ids: list[str] = field(default_factory=list)  # 基于哪些信号（可多个）
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class PostRecord:
+    """贴文记录（内容层），LLM 生成的社交媒体贴文及其 prompt。
+
+    通过 execution_id 关联到策略执行轮次，与 StrategyActionRecord 同级。
+    一次执行可能产多篇贴文（交易型按 symbol 分组），一对多关系。
+    prompt 是发给 LLM 的完整提示词，post_text 是 LLM 返回的正文。
+    """
+
+    id: str
+    execution_id: str = ""
+    action_type: str = ""  # "content" | "trading"
+    symbol: str = ""
+    strategy_name: str = ""
+    style: str = ""  # PostStyle.action_type 标识（"content" / "trading"）
+    prompt: str = ""  # 完整 LLM prompt
+    post_text: str = ""  # LLM 生成的正文
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -248,6 +269,18 @@ class TradingRepository(ABC):
     @abstractmethod
     def list_actions_by_symbol(self, symbol: str, limit: int = 50) -> list[StrategyActionRecord]:
         """列出某个币种的所有动作记录（币种故事线，按时间正序）。"""
+
+    @abstractmethod
+    def save_post(self, post: PostRecord) -> None:
+        """保存贴文记录。"""
+
+    @abstractmethod
+    def list_posts_by_execution(self, execution_id: str) -> list[PostRecord]:
+        """列出某次执行的所有贴文记录（按时间正序）。"""
+
+    @abstractmethod
+    def get_post(self, post_id: str) -> PostRecord | None:
+        """根据 ID 获取贴文记录。"""
 
     def transaction(self) -> "TransactionContext":
         """事务上下文管理器。

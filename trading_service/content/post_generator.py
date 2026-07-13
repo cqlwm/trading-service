@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,7 +16,7 @@ from pathlib import Path
 from trading_service.content.llm_client import LLMClient
 from trading_service.content.styles import ContentPostStyle, PostStyle, TradingPostStyle
 from trading_service.repository import TradingRepository
-from trading_service.repository.abc import StrategyActionRecord
+from trading_service.repository.abc import PostRecord, StrategyActionRecord
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +105,39 @@ class PostGenerator(IPostGenerator):
         symbol = actions[0].symbol if actions else ""
         if not symbol:
             return []
+
+        # 落库 PostRecord（prompt + post_text 与 execution_id 关联）
+        self._save_post_record(
+            symbol=symbol, prompt=prompt, post_text=post_text,
+            actions=actions, execution_id=execution_id, style=style.action_type,
+        )
+
         path = self._save_post(symbol, post_text, actions, execution_id)
         return [path]
+
+    def _save_post_record(
+        self,
+        symbol: str,
+        prompt: str,
+        post_text: str,
+        actions: list[StrategyActionRecord],
+        execution_id: str,
+        style: str,
+    ) -> None:
+        """将贴文（含完整 prompt）落库到 trading_posts。"""
+        action = actions[0] if actions else None
+        record = PostRecord(
+            id=uuid.uuid4().hex[:12],
+            execution_id=execution_id,
+            action_type=action.action_type if action else "",
+            symbol=symbol,
+            strategy_name=action.strategy_name if action else "",
+            style=style,
+            prompt=prompt,
+            post_text=post_text,
+            created_at=datetime.now(timezone.utc),
+        )
+        self._repo.save_post(record)
 
     def _call_llm(self, prompt: str) -> str | None:
         """调用 LLM 生成贴文。client 为 None 或调用失败时返回 None。"""

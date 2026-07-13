@@ -73,3 +73,12 @@ export function formatUsd(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '-'
   return `$${value.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
 }
+
+/** 格式化市值（带 M/B 缩写，0 或缺失显示 -） */
+export function formatMarketCap(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value) || value <= 0) return '-'
+  if (value >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(2)}B`
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`
+  if (value >= 1_000) return `$${(value / 1_000).toFixed(2)}K`
+  return `$${value.toFixed(2)}`
+}

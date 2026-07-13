@@ -52,6 +52,7 @@ export interface PositionListItem {
   source: PositionSource
   layers: number
   tp_hit: number
+  market_cap: number
   pnl_pct: number
   created_at: string
   closed_at: string | null
@@ -78,6 +79,7 @@ export interface PositionDetail {
   exit_price: number | null
   tag: string
   tp_hit: number
+  market_cap: number
   layers: number
   created_at: string
   closed_at: string | null
@@ -202,6 +204,32 @@ export interface StrategyActionRecord {
   reason_data: Record<string, unknown>
   signal_ids: string[]
   created_at: string
+}
+
+/** 贴文记录 -- LLM 生成的社交媒体贴文及其 prompt */
+export interface Post {
+  id: string
+  execution_id: string
+  action_type: string // "content" | "trading"
+  symbol: string
+  strategy_name: string
+  style: string // PostStyle 标识（"content" / "trading"）
+  prompt: string // 完整 LLM prompt
+  post_text: string // LLM 生成的正文
+  created_at: string
+}
+
+/** 策略执行详情 -- GET /api/strategies/{name}/executions/{id} */
+export interface ExecutionDetail {
+  id: string
+  strategy_name: string
+  started_at: string
+  finished_at: string | null
+  success: boolean
+  action_count: number
+  error: string | null
+  actions: StrategyActionRecord[]
+  posts: Post[]
 }
 
 /** 策略执行动作 -- 手动执行 API 响应中的动作摘要 */

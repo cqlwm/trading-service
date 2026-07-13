@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from trading_service.repository.abc import (
     OrderRecord,
     PositionRecord,
+    PostRecord,
     SignalRecord,
     StrategyActionRecord,
     StrategyExecutionRecord,
@@ -20,6 +21,7 @@ from trading_service.repository.abc import (
 from trading_service.repository.models import (
     OrderModel,
     PositionModel,
+    PostModel,
     SignalModel,
     StrategyActionModel,
     StrategyExecutionModel,
@@ -54,6 +56,7 @@ class SqlalchemyTradingStore(TradingRepository):
                 existing.exit_price = position.exit_price
                 existing.tag = position.tag
                 existing.tp_hit = position.tp_hit
+                existing.market_cap = position.market_cap
                 existing.created_at = self._dt_to_str(position.created_at)
                 existing.closed_at = self._dt_to_str(position.closed_at) if position.closed_at else None
             else:
@@ -67,6 +70,7 @@ class SqlalchemyTradingStore(TradingRepository):
                     exit_price=position.exit_price,
                     tag=position.tag,
                     tp_hit=position.tp_hit,
+                    market_cap=position.market_cap,
                     created_at=self._dt_to_str(position.created_at),
                     closed_at=self._dt_to_str(position.closed_at) if position.closed_at else None,
                 )
@@ -88,6 +92,7 @@ class SqlalchemyTradingStore(TradingRepository):
                 exit_price=model.exit_price,
                 tag=model.tag,
                 tp_hit=model.tp_hit,
+                market_cap=model.market_cap,
                 created_at=self._str_to_dt(model.created_at),
                 closed_at=self._str_to_dt(model.closed_at) if model.closed_at else None,
             )
@@ -123,6 +128,7 @@ class SqlalchemyTradingStore(TradingRepository):
                     exit_price=m.exit_price,
                     tag=m.tag,
                     tp_hit=m.tp_hit,
+                    market_cap=m.market_cap,
                     created_at=self._str_to_dt(m.created_at),
                     closed_at=self._str_to_dt(m.closed_at) if m.closed_at else None,
                 )
@@ -468,6 +474,53 @@ class SqlalchemyTradingStore(TradingRepository):
             result = session.execute(query)
             models = result.scalars().all()
             return [self._action_model_to_record(m) for m in models]
+
+    def save_post(self, post: PostRecord) -> None:
+        with Session(self.engine) as session:
+            model = PostModel(
+                id=post.id,
+                execution_id=post.execution_id,
+                action_type=post.action_type,
+                symbol=post.symbol,
+                strategy_name=post.strategy_name,
+                style=post.style,
+                prompt=post.prompt,
+                post_text=post.post_text,
+                created_at=self._dt_to_str(post.created_at),
+            )
+            session.add(model)
+            session.commit()
+
+    def _post_model_to_record(self, m: PostModel) -> PostRecord:
+        return PostRecord(
+            id=m.id,
+            execution_id=m.execution_id,
+            action_type=m.action_type,
+            symbol=m.symbol,
+            strategy_name=m.strategy_name,
+            style=m.style,
+            prompt=m.prompt,
+            post_text=m.post_text,
+            created_at=self._str_to_dt(m.created_at),
+        )
+
+    def list_posts_by_execution(self, execution_id: str) -> list[PostRecord]:
+        with Session(self.engine) as session:
+            query = (
+                select(PostModel)
+                .where(PostModel.execution_id == execution_id)
+                .order_by(PostModel.created_at)
+            )
+            result = session.execute(query)
+            models = result.scalars().all()
+            return [self._post_model_to_record(m) for m in models]
+
+    def get_post(self, post_id: str) -> PostRecord | None:
+        with Session(self.engine) as session:
+            model = session.get(PostModel, post_id)
+            if model is None:
+                return None
+            return self._post_model_to_record(model)
 
     def begin(self) -> None:
         """开始事务（SQLAlchemy 是隐式的，这里占位）。"""

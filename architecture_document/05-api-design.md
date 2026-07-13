@@ -84,6 +84,7 @@ POST   /api/positions/a1b2c3/close  # 平仓动作
             "status": "open",
             "tag": "martingale",
             "tp_hit": 1,
+            "market_cap": 48200000.0,
             "layers": 2,
             "created_at": "2024-01-15T10:30:00Z",
             "closed_at": null
@@ -109,6 +110,7 @@ POST   /api/positions/a1b2c3/close  # 平仓动作
     "exit_price": null,
     "tag": "martingale",
     "tp_hit": 1,
+    "market_cap": 48200000.0,
     "layers": 2,
     "created_at": "2024-01-15T10:30:00Z",
     "closed_at": null,

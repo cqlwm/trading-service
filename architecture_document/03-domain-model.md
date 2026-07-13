@@ -16,6 +16,7 @@ classDiagram
         +float exit_price
         +str tag
         +int tp_hit
+        +float market_cap
         +datetime created_at
         +datetime closed_at
         +List~Order~ orders
@@ -187,6 +188,7 @@ CREATE TABLE trading_positions (
     exit_price FLOAT,
     tag VARCHAR(50) DEFAULT '',
     tp_hit INTEGER DEFAULT 0,
+    market_cap FLOAT NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL,
     closed_at DATETIME
 );
@@ -209,6 +211,7 @@ CREATE INDEX idx_positions_tag ON trading_positions(tag);
 | `exit_price` | FLOAT | 平仓价格 (已平仓时有值) | `43500.0` |
 | `tag` | VARCHAR(50) | 策略标签 | `"martingale"` |
 | `tp_hit` | INTEGER | 止盈触发次数 | `3` |
+| `market_cap` | FLOAT | 开仓时定格的代币市值快照（合约口径） | `48200000.0` |
 | `created_at` | DATETIME | 创建时间 | ISO 格式 |
 | `closed_at` | DATETIME | 平仓时间 | ISO 格式 |
 

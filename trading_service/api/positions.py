@@ -64,6 +64,7 @@ async def list_positions(
             else "technical",
             "layers": len([o for o in p.orders if o.order_type == "ADD"]) + 1,
             "tp_hit": p.tp_hit,
+            "market_cap": p.market_cap,
             "pnl_pct": round(
                 p.pnl_pct(prices.get(p.symbol, 0.0)), 2
             )

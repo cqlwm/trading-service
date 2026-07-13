@@ -83,10 +83,15 @@ class Strategy(ABC):
         """
         if not self.signal_detectors:
             return []
+        # 候选币市值快照：落盘信号时携带，供开仓环节取出存入 Position（开仓时定格）
+        cap_by_symbol = {info.symbol: info.market_cap for info in candidates}
         saved_signals: list[SignalRecord] = []
         for detector in self.signal_detectors:
             results = await detector.detect(candidates)
             for result in results:
+                metadata = dict(result.metadata)
+                if result.symbol in cap_by_symbol:
+                    metadata["market_cap"] = cap_by_symbol[result.symbol]
                 signal = SignalRecord(
                     id=uuid.uuid4().hex[:12],
                     symbol=result.symbol,
@@ -94,7 +99,7 @@ class Strategy(ABC):
                     direction=result.direction,
                     severity=result.severity,
                     description=result.description,
-                    metadata_json=result.metadata,
+                    metadata_json=metadata,
                 )
                 self.exchange.db.save_signal(signal)
                 saved_signals.append(signal)

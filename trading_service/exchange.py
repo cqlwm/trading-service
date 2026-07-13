@@ -79,6 +79,7 @@ class Position:
     exit_price: float | None = None
     tag: str = ""
     tp_hit: int = 0
+    market_cap: float = 0.0  # 开仓时定格的代币市值快照（合约口径），供前端展示
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     closed_at: datetime | None = None
     orders: list[Order] = field(default_factory=list)
@@ -97,6 +98,7 @@ class Position:
             exit_price=record.exit_price,
             tag=record.tag,
             tp_hit=record.tp_hit,
+            market_cap=record.market_cap,
             created_at=record.created_at,
             closed_at=record.closed_at,
         )
@@ -115,6 +117,7 @@ class Position:
             exit_price=self.exit_price,
             tag=self.tag,
             tp_hit=self.tp_hit,
+            market_cap=self.market_cap,
             created_at=self.created_at,
             closed_at=self.closed_at,
         )
@@ -180,6 +183,7 @@ class MockExchange:
             "exit_price": pos.exit_price,
             "tag": pos.tag,
             "tp_hit": pos.tp_hit,
+            "market_cap": pos.market_cap,
             "layers": len([o for o in pos.orders if o.order_type == OrderType.ADD]) + 1,
             "created_at": pos.created_at.isoformat(),
             "closed_at": pos.closed_at.isoformat() if pos.closed_at else None,
@@ -365,8 +369,12 @@ class MockExchange:
         reason_data: dict[str, object] | None = None,
         signal_ids: list[str] | None = None,
         execution_id: str = "",
+        market_cap: float = 0.0,
     ) -> Position:
-        """开仓 - 创建持仓、OPEN 订单和动作记录（原子事务）。"""
+        """开仓 - 创建持仓、OPEN 订单和动作记录（原子事务）。
+
+        market_cap 为开仓时定格的代币市值快照（合约口径），存入 Position 供前端展示。
+        """
         with self.db.transaction():
             position = Position(
                 id=self._new_id(),
@@ -376,6 +384,7 @@ class MockExchange:
                 total_size=size,
                 tag=tag,
                 status="open",
+                market_cap=market_cap,
             )
             self.db.save_position(position.to_record())
 

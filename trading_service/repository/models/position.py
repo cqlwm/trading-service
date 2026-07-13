@@ -22,5 +22,6 @@ class PositionModel(Base):
     exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     tag: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     tp_hit: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    market_cap: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     closed_at: Mapped[str | None] = mapped_column(Text, nullable=True)

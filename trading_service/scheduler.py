@@ -17,6 +17,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from trading_service.repository import (
+    PostRecord,
     StrategyActionRecord,
     StrategyExecutionRecord,
     StrategyScheduleRecord,
@@ -301,6 +302,10 @@ class StrategyScheduler:
     def list_actions_by_execution(self, execution_id: str) -> list[StrategyActionRecord]:
         """查询某次执行的所有动作记录。"""
         return self._repo.list_actions_by_execution(execution_id)
+
+    def list_posts_by_execution(self, execution_id: str) -> list[PostRecord]:
+        """查询某次执行的所有贴文记录。"""
+        return self._repo.list_posts_by_execution(execution_id)
 
     def list_all_schedules(self) -> list[dict[str, Any]]:
         """列出所有策略的调度状态。"""

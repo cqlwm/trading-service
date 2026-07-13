@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { apiGet } from '@/api/client'
 import { ENDPOINTS, POLL_INTERVAL } from '@/lib/constants'
 import type {
+  ExecutionDetail,
   MartingaleStatus,
   MicroCapHistoryItem,
   MicroCapStatus,
@@ -58,5 +59,14 @@ export function useStrategyExecutions(name: string, limit = 10) {
       return resp.data
     },
     refetchInterval: POLL_INTERVAL,
+  })
+}
+
+/** 策略执行详情 -- GET /api/strategies/{name}/executions/{id} */
+export function useExecutionDetail(name: string, executionId: string | null) {
+  return useQuery<ExecutionDetail>({
+    queryKey: ['execution-detail', name, executionId],
+    queryFn: () => apiGet<ExecutionDetail>(ENDPOINTS.executionDetail(name, executionId!)),
+    enabled: !!executionId,
   })
 }

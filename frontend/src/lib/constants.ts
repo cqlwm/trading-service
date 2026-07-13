@@ -27,4 +27,5 @@ export const ENDPOINTS = {
   strategyStop: (name: string) => `/strategies/${name}/stop`,
   strategySchedule: (name: string) => `/strategies/${name}/schedule`,
   strategyExecutions: (name: string) => `/strategies/${name}/executions`,
+  executionDetail: (name: string, id: string) => `/strategies/${name}/executions/${id}`,
 } as const
