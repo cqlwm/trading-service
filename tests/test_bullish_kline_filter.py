@@ -1,7 +1,9 @@
 """测试 BullishKlineFilter 阳线过滤器。
 
 拉取指定 interval 的 K 线，存入 info.klines[interval]，丢弃昨日非阳线代币。
-阳线定义：昨日（倒数第二根）收盘价 >= 开盘价。
+阳线定义：昨日（最后一根已收盘 K 线）收盘价 >= 开盘价。
+
+注意：build_ohlcv_dataframe 会截断未收盘 K 线，测试数据 close_time=0（过去）不会被截断。
 """
 from __future__ import annotations
 
@@ -24,9 +26,9 @@ def make_kline(open_p: float, close_p: float) -> BinanceFutureKline:
     )
 
 
-# [yesterday, today]；[-2] 即 yesterday
-BULLISH_KLINES = [make_kline(10, 12), make_kline(12, 11)]   # [-2] 阳线(close12>=open10)
-BEARISH_KLINES = [make_kline(12, 10), make_kline(10, 11)]   # [-2] 阴线(close10<open12)
+# [前日, 昨日]；[-1] 即昨日（最后一根已收盘 K 线）
+BULLISH_KLINES = [make_kline(12, 11), make_kline(10, 12)]   # [-1] 阳线(close12>=open10)
+BEARISH_KLINES = [make_kline(10, 11), make_kline(12, 10)]   # [-1] 阴线(close10<open12)
 
 
 class FakeKlineClient:
@@ -129,11 +131,11 @@ class TestBullishKlineFilterBoundaries:
 
     @pytest.mark.asyncio
     async def test_insufficient_klines_drops(self) -> None:
-        """边界：K 线不足 2 根 -> 丢弃（无法取昨日）。"""
-        client = FakeKlineClient({"ABCUSDT": [make_kline(10, 12)]})
+        """边界：K 线为空 -> 丢弃（无法取昨日）。"""
+        client = FakeKlineClient({"ABCUSDT": []})
         flt = BullishKlineFilter(client=client, interval="1d", limit=5)
         result = await flt.apply([make_info("ABCUSDT")])
-        assert len(result) == 0, "K线不足应丢弃"
+        assert len(result) == 0, "无 K 线应丢弃"
 
     @pytest.mark.asyncio
     async def test_no_klines_for_symbol_drops(self) -> None:

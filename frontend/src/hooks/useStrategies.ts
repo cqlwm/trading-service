@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 
 import { apiGet } from '@/api/client'
-import { ENDPOINTS, POLL_INTERVAL } from '@/lib/constants'
+import { ENDPOINTS } from '@/lib/constants'
 import type {
   ContentScanStatus,
   ExecutionDetail,
@@ -16,7 +16,6 @@ export function useMartingaleStatus() {
   return useQuery<MartingaleStatus>({
     queryKey: ['strategy-status', 'martingale'],
     queryFn: () => apiGet<MartingaleStatus>(ENDPOINTS.martingaleStatus),
-    refetchInterval: POLL_INTERVAL,
   })
 }
 
@@ -25,7 +24,6 @@ export function useMartingaleShortStatus() {
   return useQuery<MartingaleStatus>({
     queryKey: ['strategy-status', 'martingale-short'],
     queryFn: () => apiGet<MartingaleStatus>(ENDPOINTS.martingaleShortStatus),
-    refetchInterval: POLL_INTERVAL,
   })
 }
 
@@ -34,7 +32,6 @@ export function useMicroCapStatus() {
   return useQuery<MicroCapStatus>({
     queryKey: ['strategy-status', 'micro-cap'],
     queryFn: () => apiGet<MicroCapStatus>(ENDPOINTS.microCapStatus),
-    refetchInterval: POLL_INTERVAL,
   })
 }
 
@@ -43,7 +40,6 @@ export function useContentScanStatus() {
   return useQuery<ContentScanStatus>({
     queryKey: ['strategy-status', 'content-scan'],
     queryFn: () => apiGet<ContentScanStatus>(ENDPOINTS.contentScanStatus),
-    refetchInterval: POLL_INTERVAL,
   })
 }
 
@@ -68,7 +64,6 @@ export function useStrategyExecutions(name: string, limit = 10) {
       )
       return resp.data
     },
-    refetchInterval: POLL_INTERVAL,
   })
 }
 

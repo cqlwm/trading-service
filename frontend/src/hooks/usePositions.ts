@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 
 import { apiGet } from '@/api/client'
-import { ENDPOINTS, POLL_INTERVAL } from '@/lib/constants'
+import { ENDPOINTS } from '@/lib/constants'
 import type { PaginatedResponse, PositionListItem, PositionStatus } from '@/types'
 
 /** 持仓列表（含历史），可按状态筛选 */
@@ -14,6 +14,5 @@ export function usePositions(status?: PositionStatus | 'all') {
         `${ENDPOINTS.positions}${param}`,
       )
     },
-    refetchInterval: POLL_INTERVAL,
   })
 }

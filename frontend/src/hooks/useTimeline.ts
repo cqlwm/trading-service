@@ -1,11 +1,11 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 
 import { apiGet, buildQuery } from '@/api/client'
-import { ENDPOINTS, PAGE_SIZE, POLL_INTERVAL } from '@/lib/constants'
+import { ENDPOINTS, PAGE_SIZE } from '@/lib/constants'
 import type { PaginatedResponse, TimelineEvent } from '@/types'
 
 /**
- * 全局交易时间线 -- 倒序，5 秒轮询。
+ * 全局交易时间线 -- 倒序。
  * 事件混合 signal/order/close 三种类型。
  */
 export function useTimeline() {
@@ -21,7 +21,6 @@ export function useTimeline() {
       if (loaded >= lastPage.total) return undefined
       return loaded
     },
-    refetchInterval: POLL_INTERVAL,
   })
 }
 

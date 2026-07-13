@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class BullishKlineFilter(ISymbolFilter):
     """阳线过滤器：拉取指定 interval 的 K 线，丢弃昨日非阳线代币。
 
-    阳线定义：昨日（倒数第二根）收盘价 >= 开盘价。
+    阳线定义：昨日（最后一根已收盘 K 线）收盘价 >= 开盘价。
     拉取的 K 线存入 info.klines[interval]，供后续复用。
     """
 
@@ -44,8 +44,8 @@ class BullishKlineFilter(ISymbolFilter):
     def _check_bullish(self, info: SymbolInfo) -> bool:
         """拉取 K 线，存入 klines，判定昨日是否阳线。"""
         df = ensure_klines(info, self.interval, self.client, self.limit)
-        if df is None or len(df) < 2:
+        if df is None or len(df) < 1:
             return False
 
-        yesterday = df.iloc[-2]
+        yesterday = df.iloc[-1]
         return float(yesterday["close"]) >= float(yesterday["open"])

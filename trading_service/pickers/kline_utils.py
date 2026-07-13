@@ -5,19 +5,30 @@ ensure_klines: 按 interval 获取 DataFrame，有缓存则用，有 client 则 
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pandas as pd
 
 from trading_service.clients.binance_client import BinanceFutureKline
 from trading_service.clients.protocols import KlineClient
 from trading_service.pickers.base import SymbolInfo
 
+_EMPTY_COLUMNS = ["datetime", "open", "high", "low", "close", "volume"]
+
 
 def build_ohlcv_dataframe(klines: list[BinanceFutureKline]) -> pd.DataFrame:
     """将 list[BinanceFutureKline] 转为含 OHLCV 列的 DataFrame。
 
+    丢弃最后一根未收盘 K 线（close_time 在未来），防止盘中信号闪烁。
     BinanceFutureKline 到此为止，不再向下传递。
     列：datetime, open, high, low, close, volume。
     """
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    if klines and klines[-1].close_time > now_ms:
+        klines = klines[:-1]
+    if not klines:
+        return pd.DataFrame(columns=_EMPTY_COLUMNS)
+
     return pd.DataFrame({
         "datetime": [k.close_time for k in klines],
         "open": [k.open_price_float for k in klines],

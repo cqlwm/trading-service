@@ -64,6 +64,7 @@ export function useExecuteStrategy(
       qc.invalidateQueries({ queryKey: ['positions'] })
       qc.invalidateQueries({ queryKey: ['orders'] })
       qc.invalidateQueries({ queryKey: ['strategy-status'] })
+      qc.invalidateQueries({ queryKey: ['strategy-executions'] })
       qc.invalidateQueries({ queryKey: ['timeline'] })
     },
     onError: (err) => {
