@@ -17,6 +17,7 @@ dependencies = [
     "ta-lib>=0.7.0",
     "pandas>=3.0.3",
     "openai>=2.45.0",
+    "binance-service",
 ]
 
 [tool.pyright]
@@ -45,3 +46,6 @@ testpaths = ["tests"]
 markers = [
     "integration: 标记需要外部服务的集成测试（网络、API、数据库等）",
 ]
+
+[tool.uv.sources]
+binance-service = { path = "../binance-service" }

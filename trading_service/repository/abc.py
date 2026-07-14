@@ -106,6 +106,11 @@ class PostRecord:
     通过 execution_id 关联到策略执行轮次，与 StrategyActionRecord 同级。
     一次执行可能产多篇贴文（交易型按 symbol 分组），一对多关系。
     prompt 是发给 LLM 的完整提示词，post_text 是 LLM 返回的正文。
+
+    发布状态字段（postx 发布到 Binance Square）：
+    - published_at: 发布成功时间，None 表示尚未发布
+    - share_link: Binance Square 返回的分享链接
+    - publish_error: 发布失败的错误信息（用于排查和重试）
     """
 
     id: str
@@ -117,6 +122,10 @@ class PostRecord:
     prompt: str = ""  # 完整 LLM prompt
     post_text: str = ""  # LLM 生成的正文
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # 发布状态（postx 发布到 Binance Square）
+    published_at: datetime | None = None
+    share_link: str = ""
+    publish_error: str = ""
 
 
 class TradingRepository(ABC):
@@ -285,6 +294,20 @@ class TradingRepository(ABC):
     @abstractmethod
     def get_post(self, post_id: str) -> PostRecord | None:
         """根据 ID 获取贴文记录。"""
+
+    @abstractmethod
+    def update_post_publish_result(
+        self,
+        post_id: str,
+        published_at: datetime | None,
+        share_link: str | None,
+        publish_error: str | None,
+    ) -> None:
+        """更新贴文的发布状态（postx 发布到 Binance Square）。
+
+        发布成功时传入 published_at + share_link（publish_error 置空）；
+        发布失败时传入 publish_error（published_at/share_link 置空）。
+        """
 
     def transaction(self) -> "TransactionContext":
         """事务上下文管理器。

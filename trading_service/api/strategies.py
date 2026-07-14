@@ -225,6 +225,9 @@ async def get_execution_detail(
                 "prompt": p.prompt,
                 "post_text": p.post_text,
                 "created_at": p.created_at.isoformat(),
+                "published_at": p.published_at.isoformat() if p.published_at else None,
+                "share_link": p.share_link,
+                "publish_error": p.publish_error,
             }
             for p in posts
         ],

@@ -293,7 +293,7 @@ class FakePostGenerator:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def generate_for_execution(self, execution_id: str) -> list:
+    async def generate_for_execution(self, execution_id: str) -> list:
         self.calls.append(execution_id)
         return []
 

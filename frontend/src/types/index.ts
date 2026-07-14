@@ -226,6 +226,10 @@ export interface Post {
   prompt: string // 完整 LLM prompt
   post_text: string // LLM 生成的正文
   created_at: string
+  // 发布状态（postx 发布到 Binance Square）
+  published_at: string | null // 发布成功时间，null 表示未发布
+  share_link: string // Binance Square 分享链接
+  publish_error: string // 发布失败的错误信息
 }
 
 /** 策略执行详情 -- GET /api/strategies/{name}/executions/{id} */
@@ -255,6 +259,13 @@ export interface StrategyExecuteResponse {
   execution_id: string
   actions: StrategyAction[]
   action_count: number
+}
+
+/** 贴文发布响应 -- POST /api/posts/{id}/publish */
+export interface PublishPostResponse {
+  status: string
+  post_id: string
+  share_link: string | null
 }
 
 /** 微市值历史记录 —— GET /api/strategies/micro-cap/history */

@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     posts_dir: str = "~/projects/trading-service/mydata/posts"
     posts_enabled: bool = True  # 总开关，llm_api_key 为空时自动跳过
 
+    # postx 发布配置（发布到 Binance Square，依赖 binance-service 包）
+    postx_enabled: bool = False  # 总开关，默认关闭；开启后 LLM 生成贴文自动截图发帖
+    postx_storage_state_path: str = ""  # 登录态 JSON 路径，空则用 binance-service 默认
+    postx_headless: bool = True  # 无头模式
+    postx_timeframe: str = "1h"  # K 线周期: 5m/15m/1h/4h/1d/1w
+    postx_debug: bool = False  # 调试模式（保存调试截图）
+
     model_config = SettingsConfigDict(
         env_prefix="TRADING_",
         env_file=".env",
@@ -94,3 +101,9 @@ DB_PARENT.mkdir(parents=True, exist_ok=True)
 # 展开贴文目录路径并确保目录存在
 settings.posts_dir = str(Path(settings.posts_dir).expanduser())
 Path(settings.posts_dir).mkdir(parents=True, exist_ok=True)
+
+# 展开 postx 登录态路径（非空时展开 ~）
+if settings.postx_storage_state_path:
+    settings.postx_storage_state_path = str(
+        Path(settings.postx_storage_state_path).expanduser()
+    )

@@ -225,7 +225,7 @@ class StrategyScheduler:
             # 贴文生成：有动作变动时触发，失败不影响策略执行
             if actions and self._post_generator:
                 try:
-                    self._post_generator.generate_for_execution(execution_id)
+                    await self._post_generator.generate_for_execution(execution_id)
                 except Exception as e:
                     logger.warning(f"贴文生成失败（不影响策略执行）: {e}")
         except Exception as e:
@@ -276,7 +276,7 @@ class StrategyScheduler:
             # 贴文生成：有动作变动时触发，失败不影响策略执行
             if actions and self._post_generator:
                 try:
-                    self._post_generator.generate_for_execution(execution_id)
+                    await self._post_generator.generate_for_execution(execution_id)
                 except Exception as e:
                     logger.warning(f"贴文生成失败（不影响策略执行）: {e}")
 

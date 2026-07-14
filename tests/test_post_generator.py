@@ -74,13 +74,14 @@ def posts_dir(tmp_path: Path) -> Path:
 class TestPostGeneratorNormalPath:
     """正常路径测试。"""
 
-    def test_generates_post_and_saves_file(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_generates_post_and_saves_file(self, repo, posts_dir: Path) -> None:
         """✅ 有动作记录 -> 生成贴文 -> 保存文件。"""
         repo.save_action(make_action(symbol="BTCUSDT"))
         llm = FakeLLMClient(response="BTC 做空入场，目标明确！")
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
 
-        files = gen.generate_for_execution("exec001")
+        files = await gen.generate_for_execution("exec001")
 
         assert len(files) == 1
         assert files[0].exists()
@@ -88,13 +89,14 @@ class TestPostGeneratorNormalPath:
         assert "BTC 做空入场，目标明确！" in content
         assert "BTCUSDT" in content
 
-    def test_file_naming_format(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_file_naming_format(self, repo, posts_dir: Path) -> None:
         """✅ 文件名格式: {timestamp}_{symbol}.md"""
         repo.save_action(make_action(symbol="ETHUSDT"))
         llm = FakeLLMClient()
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
 
-        files = gen.generate_for_execution("exec001")
+        files = await gen.generate_for_execution("exec001")
 
         assert len(files) == 1
         filename = files[0].name
@@ -103,7 +105,8 @@ class TestPostGeneratorNormalPath:
         prefix = filename[:-len("_ETHUSDT.md")]
         datetime.strptime(prefix, "%Y-%m-%d_%H%M%S")
 
-    def test_post_includes_action_metadata(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_post_includes_action_metadata(self, repo, posts_dir: Path) -> None:
         """✅ 贴文文件底部应附本次执行动作记录。"""
         repo.save_action(make_action(
             symbol="BTCUSDT", action_type="add",
@@ -113,7 +116,7 @@ class TestPostGeneratorNormalPath:
         llm = FakeLLMClient(response="贴文正文")
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
 
-        files = gen.generate_for_execution("exec001")
+        files = await gen.generate_for_execution("exec001")
 
         content = files[0].read_text(encoding="utf-8")
         assert "第 1 次加仓 @ 65500" in content
@@ -123,32 +126,35 @@ class TestPostGeneratorNormalPath:
 class TestPostGeneratorSkipConditions:
     """跳过条件测试。"""
 
-    def test_empty_actions_returns_empty(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_empty_actions_returns_empty(self, repo, posts_dir: Path) -> None:
         """✅ execution 无动作 -> 返回空列表，不调 LLM。"""
         llm = FakeLLMClient()
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
 
-        files = gen.generate_for_execution("nonexistent_exec")
+        files = await gen.generate_for_execution("nonexistent_exec")
 
         assert files == []
         assert len(llm.prompts) == 0, "无动作时不应调用 LLM"
 
-    def test_no_llm_client_returns_empty(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_no_llm_client_returns_empty(self, repo, posts_dir: Path) -> None:
         """✅ client 为 None -> 返回空列表。"""
         repo.save_action(make_action())
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=None)
 
-        files = gen.generate_for_execution("exec001")
+        files = await gen.generate_for_execution("exec001")
 
         assert files == []
 
-    def test_llm_failure_returns_empty(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_llm_failure_returns_empty(self, repo, posts_dir: Path) -> None:
         """✅ LLM 调用失败 -> 返回空列表，不崩溃。"""
         repo.save_action(make_action())
         llm = FakeLLMClient(should_fail=True)
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
 
-        files = gen.generate_for_execution("exec001")
+        files = await gen.generate_for_execution("exec001")
 
         assert files == []
 
@@ -156,14 +162,15 @@ class TestPostGeneratorSkipConditions:
 class TestPostGeneratorMultiSymbol:
     """多 symbol 分组测试。"""
 
-    def test_multiple_symbols_each_gets_post(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_multiple_symbols_each_gets_post(self, repo, posts_dir: Path) -> None:
         """✅ 一次 execution 涉及多个 symbol -> 每个生成一篇。"""
         repo.save_action(make_action(symbol="BTCUSDT"))
         repo.save_action(make_action(symbol="ETHUSDT", reason_text="开仓 @ 3000"))
         llm = FakeLLMClient(response="贴文")
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
 
-        files = gen.generate_for_execution("exec001")
+        files = await gen.generate_for_execution("exec001")
 
         assert len(files) == 2
         symbols_in_files = {f.stem.split("_")[-1] for f in files}
@@ -174,13 +181,14 @@ class TestPostGeneratorMultiSymbol:
 class TestPostGeneratorHistoricalPosts:
     """历史贴文去重测试。"""
 
-    def test_historical_posts_included_in_prompt(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_historical_posts_included_in_prompt(self, repo, posts_dir: Path) -> None:
         """✅ symbol 有历史贴文 -> 作为上下文传入 prompt。"""
         # 先生成一篇历史贴文
         repo.save_action(make_action(symbol="BTCUSDT"))
         llm1 = FakeLLMClient(response="第一次开仓贴文")
         gen1 = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm1)
-        gen1.generate_for_execution("exec001")
+        await gen1.generate_for_execution("exec001")
 
         # 再生成第二篇，prompt 应包含历史贴文
         repo.save_action(make_action(
@@ -190,28 +198,30 @@ class TestPostGeneratorHistoricalPosts:
         llm2 = FakeLLMClient(response="加仓贴文")
         gen2 = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm2)
 
-        gen2.generate_for_execution("exec002")
+        await gen2.generate_for_execution("exec002")
 
         assert len(llm2.prompts) == 1
         assert "第一次开仓贴文" in llm2.prompts[0], "历史贴文应出现在 prompt 中"
 
-    def test_no_historical_posts_shows_placeholder(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_no_historical_posts_shows_placeholder(self, repo, posts_dir: Path) -> None:
         """✅ 无历史贴文时 prompt 显示占位符。"""
         repo.save_action(make_action(symbol="SOLUSDT"))
         llm = FakeLLMClient()
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
 
-        gen.generate_for_execution("exec001")
+        await gen.generate_for_execution("exec001")
 
         assert "暂无历史贴文" in llm.prompts[0]
 
-    def test_historical_posts_include_timestamp(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_historical_posts_include_timestamp(self, repo, posts_dir: Path) -> None:
         """✅ 历史贴文应带时间信息，帮助 LLM 理解发布时间。"""
         # 先生成一篇历史贴文（落库，含 created_at）
         repo.save_action(make_action(symbol="BTCUSDT"))
         llm1 = FakeLLMClient(response="第一次开仓贴文XYZ")
         gen1 = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm1)
-        gen1.generate_for_execution("exec001")
+        await gen1.generate_for_execution("exec001")
 
         # 再生成第二篇，prompt 应包含历史贴文的时间
         repo.save_action(make_action(
@@ -221,7 +231,7 @@ class TestPostGeneratorHistoricalPosts:
         llm2 = FakeLLMClient(response="加仓贴文")
         gen2 = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm2)
 
-        gen2.generate_for_execution("exec002")
+        await gen2.generate_for_execution("exec002")
 
         prompt = llm2.prompts[0]
         # 提取历史贴文渲染区：从"该币种历史贴文"到下一个"## "标题
@@ -231,12 +241,13 @@ class TestPostGeneratorHistoricalPosts:
         assert "第一次开仓贴文XYZ" in hist_section, "历史贴文正文应在历史贴文区域"
         assert "2026-" in hist_section, "历史贴文区域应带时间信息"
 
-    def test_load_historical_posts_returns_time_and_text(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_load_historical_posts_returns_time_and_text(self, repo, posts_dir: Path) -> None:
         """✅ _load_historical_posts 返回带时间戳的贴文列表。"""
         repo.save_action(make_action(symbol="BTCUSDT"))
         llm = FakeLLMClient(response="测试贴文")
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
-        gen.generate_for_execution("exec001")
+        await gen.generate_for_execution("exec001")
 
         historical = gen._load_historical_posts("BTCUSDT")
         assert len(historical) == 1, "应返回 1 篇历史贴文"
@@ -277,31 +288,34 @@ def make_content_action(
 class TestPostGeneratorContentPath:
     """内容型路径测试：content 动作 -> 走信号路径生成贴文。"""
 
-    def test_content_action_generates_post(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_content_action_generates_post(self, repo, posts_dir: Path) -> None:
         """✅ content 动作 -> 生成贴文 -> 保存文件。"""
         repo.save_action(make_content_action(symbol="BTCUSDT"))
         llm = FakeLLMClient(response="BTC 连涨3天，势头正猛！")
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
 
-        files = gen.generate_for_execution("exec_content_001")
+        files = await gen.generate_for_execution("exec_content_001")
 
         assert len(files) == 1
         content = files[0].read_text(encoding="utf-8")
         assert "BTC 连涨3天，势头正猛！" in content
 
-    def test_content_prompt_uses_market_observer_role(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_content_prompt_uses_market_observer_role(self, repo, posts_dir: Path) -> None:
         """✅ content prompt 使用市场观察者角色（不是马丁做空）。"""
         repo.save_action(make_content_action(symbol="BTCUSDT"))
         llm = FakeLLMClient()
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
 
-        gen.generate_for_execution("exec_content_001")
+        await gen.generate_for_execution("exec_content_001")
 
         assert len(llm.prompts) == 1
         assert "市场观察者" in llm.prompts[0], "应使用内容型角色"
         assert "马丁格尔做空" not in llm.prompts[0], "不应包含交易型角色"
 
-    def test_content_prompt_includes_signals(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_content_prompt_includes_signals(self, repo, posts_dir: Path) -> None:
         """✅ content prompt 应包含信号信息。"""
         # 先存信号
         from trading_service.repository.abc import SignalRecord
@@ -318,7 +332,7 @@ class TestPostGeneratorContentPath:
         llm = FakeLLMClient()
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
 
-        gen.generate_for_execution("exec_content_001")
+        await gen.generate_for_execution("exec_content_001")
 
         assert "consecutive_rise" in llm.prompts[0], "prompt 应包含信号类型"
 
@@ -326,13 +340,14 @@ class TestPostGeneratorContentPath:
 class TestPostGeneratorPersistence:
     """贴文持久化测试：生成贴文后应落库到 trading_posts。"""
 
-    def test_trading_post_persisted_to_db(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_trading_post_persisted_to_db(self, repo, posts_dir: Path) -> None:
         """✅ 交易型贴文生成后落库，含 prompt 和 post_text。"""
         repo.save_action(make_action(symbol="BTCUSDT"))
         llm = FakeLLMClient(response="BTC 做空入场！")
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
 
-        gen.generate_for_execution("exec001")
+        await gen.generate_for_execution("exec001")
 
         posts = repo.list_posts_by_execution("exec001")
         assert len(posts) == 1, f"应落库 1 条贴文，实际 {len(posts)}"
@@ -346,7 +361,8 @@ class TestPostGeneratorPersistence:
         assert post.action_type == "open", f"action_type 应为 open，实际 {post.action_type}"
         assert post.strategy_name == "martingale_short"
 
-    def test_content_post_persisted_to_db(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_content_post_persisted_to_db(self, repo, posts_dir: Path) -> None:
         """✅ 内容型贴文生成后落库，含 prompt 和 post_text。"""
         from trading_service.repository.abc import SignalRecord
         repo.save_signal(SignalRecord(
@@ -358,7 +374,7 @@ class TestPostGeneratorPersistence:
         llm = FakeLLMClient(response="BTC 连涨3天！")
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
 
-        gen.generate_for_execution("exec_content_001")
+        await gen.generate_for_execution("exec_content_001")
 
         posts = repo.list_posts_by_execution("exec_content_001")
         assert len(posts) == 1, f"应落库 1 条贴文，实际 {len(posts)}"
@@ -370,13 +386,14 @@ class TestPostGeneratorPersistence:
         assert post.action_type == "content", f"action_type 应为 content，实际 {post.action_type}"
         assert post.strategy_name == "content_scan"
 
-    def test_prompt_is_complete_llm_input(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_prompt_is_complete_llm_input(self, repo, posts_dir: Path) -> None:
         """✅ 落库的 prompt 应是发给 LLM 的完整提示词（与 FakeLLMClient 记录的一致）。"""
         repo.save_action(make_action(symbol="BTCUSDT"))
         llm = FakeLLMClient(response="贴文正文")
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
 
-        gen.generate_for_execution("exec001")
+        await gen.generate_for_execution("exec001")
 
         posts = repo.list_posts_by_execution("exec001")
         assert len(posts) == 1
@@ -384,48 +401,52 @@ class TestPostGeneratorPersistence:
         assert len(llm.prompts) == 1
         assert posts[0].prompt == llm.prompts[0], "落库的 prompt 应与发给 LLM 的 prompt 一致"
 
-    def test_multiple_symbols_each_persisted(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_multiple_symbols_each_persisted(self, repo, posts_dir: Path) -> None:
         """✅ 多 symbol 分组 -> 每个落库一条 PostRecord。"""
         repo.save_action(make_action(symbol="BTCUSDT"))
         repo.save_action(make_action(symbol="ETHUSDT", reason_text="开仓 @ 3000"))
         llm = FakeLLMClient(response="贴文")
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
 
-        gen.generate_for_execution("exec001")
+        await gen.generate_for_execution("exec001")
 
         posts = repo.list_posts_by_execution("exec001")
         assert len(posts) == 2, f"应落库 2 条贴文，实际 {len(posts)}"
         symbols = {p.symbol for p in posts}
         assert symbols == {"BTCUSDT", "ETHUSDT"}
 
-    def test_llm_failure_no_post_persisted(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_llm_failure_no_post_persisted(self, repo, posts_dir: Path) -> None:
         """✅ LLM 调用失败 -> 不落库贴文。"""
         repo.save_action(make_action())
         llm = FakeLLMClient(should_fail=True)
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
 
-        gen.generate_for_execution("exec001")
+        await gen.generate_for_execution("exec001")
 
         posts = repo.list_posts_by_execution("exec001")
         assert len(posts) == 0, "LLM 失败时不应落库贴文"
 
-    def test_no_llm_client_no_post_persisted(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_no_llm_client_no_post_persisted(self, repo, posts_dir: Path) -> None:
         """✅ 无 LLM client -> 不落库贴文。"""
         repo.save_action(make_action())
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=None)
 
-        gen.generate_for_execution("exec001")
+        await gen.generate_for_execution("exec001")
 
         posts = repo.list_posts_by_execution("exec001")
         assert len(posts) == 0, "无 LLM client 时不应落库贴文"
 
-    def test_get_post_by_id(self, repo, posts_dir: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_get_post_by_id(self, repo, posts_dir: Path) -> None:
         """✅ 落库后可通过 get_post(id) 查询单条。"""
         repo.save_action(make_action(symbol="BTCUSDT"))
         llm = FakeLLMClient(response="贴文正文")
         gen = PostGenerator(repo=repo, posts_dir=str(posts_dir), llm_client=llm)
 
-        gen.generate_for_execution("exec001")
+        await gen.generate_for_execution("exec001")
 
         posts = repo.list_posts_by_execution("exec001")
         assert len(posts) == 1

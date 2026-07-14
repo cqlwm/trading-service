@@ -3,9 +3,13 @@
 IPostGenerator 定义贴文生成的唯一契约 generate_for_execution。
 PostGenerator 是默认实现，按 action_type 分发到不同的 PostStyle，
 共享 LLM 调用、文件保存、历史贴文加载等基础设施。
+
+生成贴文后可选自动发布到 Binance Square（通过 IPublisher），
+发布结果回写到 PostRecord 的 published_at / share_link / publish_error 字段。
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -14,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from trading_service.content.llm_client import LLMClient
+from trading_service.content.publisher import IPublisher, resolve_base_asset
 from trading_service.content.styles import ContentPostStyle, PostStyle, TradingPostStyle
 from trading_service.repository import TradingRepository
 from trading_service.repository.abc import PostRecord, StrategyActionRecord
@@ -25,7 +30,7 @@ class IPostGenerator(ABC):
     """贴文生成器接口。"""
 
     @abstractmethod
-    def generate_for_execution(self, execution_id: str) -> list[Path]:
+    async def generate_for_execution(self, execution_id: str) -> list[Path]:
         """为一次策略执行生成贴文。"""
         ...
 
@@ -35,6 +40,7 @@ class PostGenerator(IPostGenerator):
 
     共享基础设施（LLM 调用、文件保存、历史贴文加载）在本类中，
     上下文构建和 prompt 构建委托给可插拔的 PostStyle。
+    生成后可选通过 IPublisher 自动发布到 Binance Square。
     """
 
     def __init__(
@@ -44,11 +50,15 @@ class PostGenerator(IPostGenerator):
         llm_client: LLMClient | None = None,
         llm_model: str = "gpt-4o-mini",
         styles: list[PostStyle] | None = None,
+        publisher: IPublisher | None = None,
+        publish_timeframe: str = "1h",
     ) -> None:
         self._repo = repo
         self._posts_dir = Path(posts_dir)
         self._llm_client = llm_client
         self._llm_model = llm_model
+        self._publisher = publisher
+        self._publish_timeframe = publish_timeframe
 
         # 注册风格：默认包含交易型和内容型
         self._styles: dict[str, PostStyle] = {}
@@ -56,8 +66,16 @@ class PostGenerator(IPostGenerator):
             self._styles[style.action_type] = style
         self._default_style_key = "trading"
 
-    def generate_for_execution(self, execution_id: str) -> list[Path]:
-        """为一次策略执行生成贴文。无 LLM 或无动作时返回空列表。"""
+    async def generate_for_execution(self, execution_id: str) -> list[Path]:
+        """为一次策略执行生成贴文。无 LLM 或无动作时返回空列表。
+
+        生成 + 发布均在后台线程中执行（LLM 和 Playwright 都是同步阻塞调用）。
+        发布失败不影响贴文生成结果，仅记录 publish_error。
+        """
+        return await asyncio.to_thread(self._generate_for_execution_sync, execution_id)
+
+    def _generate_for_execution_sync(self, execution_id: str) -> list[Path]:
+        """同步执行：生成贴文 -> 保存 -> 可选发布 -> 回写结果。"""
         if self._llm_client is None:
             return []
 
@@ -90,7 +108,7 @@ class PostGenerator(IPostGenerator):
     def _generate_with_style(
         self, style: PostStyle, actions: list[StrategyActionRecord], execution_id: str,
     ) -> list[Path]:
-        """用指定风格生成贴文。"""
+        """用指定风格生成贴文，并可选发布。"""
         context = style.build_context(
             repo=self._repo,
             actions=actions,
@@ -107,13 +125,44 @@ class PostGenerator(IPostGenerator):
             return []
 
         # 落库 PostRecord（prompt + post_text 与 execution_id 关联）
-        self._save_post_record(
+        post_id = self._save_post_record(
             symbol=symbol, prompt=prompt, post_text=post_text,
             actions=actions, execution_id=execution_id, style=style.action_type,
         )
 
         path = self._save_post(symbol, post_text, actions, execution_id)
+
+        # 自动发布到 Binance Square（失败不抛出，仅记录错误）
+        self._try_publish(post_id, symbol, post_text)
+
         return [path]
+
+    def _try_publish(self, post_id: str, symbol: str, post_text: str) -> None:
+        """尝试发布到 Binance Square，成功/失败都回写 PostRecord。"""
+        if self._publisher is None:
+            return
+        try:
+            base_asset = resolve_base_asset(symbol)
+            share_link = self._publisher.publish_postx(
+                base_asset=base_asset,
+                content=post_text,
+                timeframe=self._publish_timeframe,
+            )
+            self._repo.update_post_publish_result(
+                post_id=post_id,
+                published_at=datetime.now(timezone.utc),
+                share_link=share_link,
+                publish_error=None,
+            )
+            logger.info(f"贴文已发布到 Binance Square: {symbol} -> {share_link}")
+        except Exception as e:
+            self._repo.update_post_publish_result(
+                post_id=post_id,
+                published_at=None,
+                share_link=None,
+                publish_error=str(e),
+            )
+            logger.warning(f"发布到 Binance Square 失败（不影响贴文生成）: {e}")
 
     def _save_post_record(
         self,
@@ -123,11 +172,12 @@ class PostGenerator(IPostGenerator):
         actions: list[StrategyActionRecord],
         execution_id: str,
         style: str,
-    ) -> None:
-        """将贴文（含完整 prompt）落库到 trading_posts。"""
+    ) -> str:
+        """将贴文（含完整 prompt）落库到 trading_posts，返回 post_id。"""
         action = actions[0] if actions else None
+        post_id = uuid.uuid4().hex[:12]
         record = PostRecord(
-            id=uuid.uuid4().hex[:12],
+            id=post_id,
             execution_id=execution_id,
             action_type=action.action_type if action else "",
             symbol=symbol,
@@ -138,6 +188,7 @@ class PostGenerator(IPostGenerator):
             created_at=datetime.now(timezone.utc),
         )
         self._repo.save_post(record)
+        return post_id
 
     def _call_llm(self, prompt: str) -> str | None:
         """调用 LLM 生成贴文。client 为 None 或调用失败时返回 None。"""

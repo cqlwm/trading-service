@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 import pytest
 
@@ -327,6 +328,23 @@ class InMemoryTradingRepository(TradingRepository):
         if self._in_transaction and post_id in self._temp_posts:
             return self._temp_posts[post_id]
         return self.posts.get(post_id)
+
+    def update_post_publish_result(
+        self,
+        post_id: str,
+        published_at: datetime | None,
+        share_link: str | None,
+        publish_error: str | None,
+    ) -> None:
+        """更新贴文的发布状态（内存实现）。"""
+        post = self.posts.get(post_id)
+        if post is None and self._in_transaction:
+            post = self._temp_posts.get(post_id)
+        if post is None:
+            return
+        post.published_at = published_at
+        post.share_link = share_link or ""
+        post.publish_error = publish_error or ""
 
 
 @pytest.fixture

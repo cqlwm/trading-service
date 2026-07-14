@@ -5,6 +5,7 @@ import { apiPost } from '@/api/client'
 import { ENDPOINTS } from '@/lib/constants'
 import type {
   ClosePositionResponse,
+  PublishPostResponse,
   StrategyExecuteResponse,
   StrategySchedule,
 } from '@/types'
@@ -99,6 +100,22 @@ export function useStopStrategySchedule() {
     },
     onError: (err) => {
       toast.error(`停止调度失败：${err.message}`)
+    },
+  })
+}
+
+/** 手动发布贴文到 Binance Square -- POST /api/posts/{id}/publish */
+export function usePublishPost() {
+  const qc = useQueryClient()
+  return useMutation<PublishPostResponse, Error, string>({
+    mutationFn: (postId) => apiPost<PublishPostResponse>(ENDPOINTS.publishPost(postId)),
+    onSuccess: () => {
+      toast.success(`贴文已发布到 Binance Square`)
+      // 刷新执行详情，让 PostCard 更新发布状态
+      qc.invalidateQueries({ queryKey: ['execution-detail'] })
+    },
+    onError: (err) => {
+      toast.error(`发布失败：${err.message}`)
     },
   })
 }

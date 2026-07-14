@@ -477,18 +477,35 @@ class SqlalchemyTradingStore(TradingRepository):
 
     def save_post(self, post: PostRecord) -> None:
         with Session(self.engine) as session:
-            model = PostModel(
-                id=post.id,
-                execution_id=post.execution_id,
-                action_type=post.action_type,
-                symbol=post.symbol,
-                strategy_name=post.strategy_name,
-                style=post.style,
-                prompt=post.prompt,
-                post_text=post.post_text,
-                created_at=self._dt_to_str(post.created_at),
-            )
-            session.add(model)
+            existing = session.get(PostModel, post.id)
+            if existing:
+                existing.execution_id = post.execution_id
+                existing.action_type = post.action_type
+                existing.symbol = post.symbol
+                existing.strategy_name = post.strategy_name
+                existing.style = post.style
+                existing.prompt = post.prompt
+                existing.post_text = post.post_text
+                existing.created_at = self._dt_to_str(post.created_at)
+                existing.published_at = self._dt_to_str(post.published_at) if post.published_at else None
+                existing.share_link = post.share_link
+                existing.publish_error = post.publish_error
+            else:
+                model = PostModel(
+                    id=post.id,
+                    execution_id=post.execution_id,
+                    action_type=post.action_type,
+                    symbol=post.symbol,
+                    strategy_name=post.strategy_name,
+                    style=post.style,
+                    prompt=post.prompt,
+                    post_text=post.post_text,
+                    created_at=self._dt_to_str(post.created_at),
+                    published_at=self._dt_to_str(post.published_at) if post.published_at else None,
+                    share_link=post.share_link,
+                    publish_error=post.publish_error,
+                )
+                session.add(model)
             session.commit()
 
     def _post_model_to_record(self, m: PostModel) -> PostRecord:
@@ -502,6 +519,9 @@ class SqlalchemyTradingStore(TradingRepository):
             prompt=m.prompt,
             post_text=m.post_text,
             created_at=self._str_to_dt(m.created_at),
+            published_at=self._str_to_dt(m.published_at) if m.published_at else None,
+            share_link=m.share_link,
+            publish_error=m.publish_error,
         )
 
     def list_posts_by_execution(self, execution_id: str) -> list[PostRecord]:
@@ -533,6 +553,23 @@ class SqlalchemyTradingStore(TradingRepository):
             if model is None:
                 return None
             return self._post_model_to_record(model)
+
+    def update_post_publish_result(
+        self,
+        post_id: str,
+        published_at: datetime | None,
+        share_link: str | None,
+        publish_error: str | None,
+    ) -> None:
+        """更新贴文的发布状态。"""
+        with Session(self.engine) as session:
+            model = session.get(PostModel, post_id)
+            if model is None:
+                return
+            model.published_at = self._dt_to_str(published_at) if published_at else None
+            model.share_link = share_link or ""
+            model.publish_error = publish_error or ""
+            session.commit()
 
     def begin(self) -> None:
         """开始事务（SQLAlchemy 是隐式的，这里占位）。"""

@@ -98,8 +98,20 @@ _content_scan_strategy = ContentScanStrategy(
 
 # 贴文生成器（LLM 生成交易动态贴文，api_key 为空时自动跳过）
 from trading_service.content import PostGenerator, create_openai_client
+from trading_service.content.publisher import BinancePublisher, IPublisher
 
 _post_generator: PostGenerator | None = None
+_publisher: IPublisher | None = None
+
+# postx 发布器（postx_enabled 时创建，懒加载浏览器）
+if settings.postx_enabled:
+    _publisher = BinancePublisher(
+        storage_state_path=settings.postx_storage_state_path or None,
+        headless=settings.postx_headless,
+        timeframe=settings.postx_timeframe,
+        debug=settings.postx_debug,
+    )
+
 if settings.posts_enabled:
     _llm_result = create_openai_client(
         base_url=settings.llm_base_url,
@@ -112,6 +124,8 @@ if settings.posts_enabled:
             posts_dir=settings.posts_dir,
             llm_client=_llm_result[0],
             llm_model=_llm_result[1],
+            publisher=_publisher,
+            publish_timeframe=settings.postx_timeframe,
         )
 
 # 统一策略调度器（管理所有策略的定时执行，信号检测器作为策略组件由策略内部调用）
@@ -152,9 +166,21 @@ def get_strategy_scheduler() -> StrategyScheduler:
     return _strategy_scheduler
 
 
+def get_publisher() -> IPublisher | None:
+    """获取 postx 发布器实例（未启用时返回 None）。"""
+    return _publisher
+
+
+def get_trading_store() -> SqlalchemyTradingStore:
+    """获取 TradingStore 实例（用于直接仓库操作，如手动发布端点）。"""
+    return _trading_store
+
+
 ExchangeDep = Annotated[MockExchange, Depends(get_exchange)]
 MartingaleDep = Annotated[MartingaleStrategy, Depends(get_martingale_strategy)]
 MicroCapDep = Annotated[MicroCapStrategy, Depends(get_micro_cap_strategy)]
 MartingaleShortDep = Annotated[MartingaleShortStrategy, Depends(get_martingale_short_strategy)]
 ContentScanDep = Annotated[ContentScanStrategy, Depends(get_content_scan_strategy)]
 SchedulerDep = Annotated[StrategyScheduler, Depends(get_strategy_scheduler)]
+PublisherDep = Annotated[IPublisher | None, Depends(get_publisher)]
+TradingStoreDep = Annotated[SqlalchemyTradingStore, Depends(get_trading_store)]

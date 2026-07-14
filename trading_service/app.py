@@ -7,8 +7,8 @@ from typing import AsyncGenerator, Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from trading_service.api import positions, orders, signals, timeline, strategies
-from trading_service.api.deps import get_strategy_scheduler
+from trading_service.api import positions, orders, signals, timeline, strategies, posts
+from trading_service.api.deps import get_strategy_scheduler, get_publisher
 from trading_service.config import settings
 from trading_service.migration_check import check_migrations, run_migrations
 
@@ -54,6 +54,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any, None]:
 
     # 关闭策略调度器
     await scheduler.shutdown()
+
+    # 关闭 postx 发布器（释放浏览器资源）
+    publisher = get_publisher()
+    if publisher is not None:
+        publisher.close()
+        logger.info("🔒 postx 发布器已关闭")
+
     logger.info("👋 Trading Service shutdown complete")
 
 
@@ -79,6 +86,7 @@ app.include_router(orders.router, prefix="/api/orders")
 app.include_router(signals.router, prefix="/api/signals")
 app.include_router(timeline.router, prefix="/api")
 app.include_router(strategies.router, prefix="/api/strategies")
+app.include_router(posts.router, prefix="/api/posts")
 
 
 @app.get("/")
