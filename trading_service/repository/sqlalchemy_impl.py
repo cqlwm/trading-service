@@ -475,6 +475,30 @@ class SqlalchemyTradingStore(TradingRepository):
             models = result.scalars().all()
             return [self._action_model_to_record(m) for m in models]
 
+    def list_actions(
+        self,
+        strategy_name: str | None = None,
+        action_type: str | None = None,
+        since: datetime | None = None,
+        limit: int = 200,
+    ) -> list[StrategyActionRecord]:
+        """通用动作查询：按策略/类型/时间过滤，按 created_at 倒序返回。
+
+        created_at 存为 UTC ISO 字符串，字典序与时间序一致，故字符串比较 >= 安全。
+        """
+        with Session(self.engine) as session:
+            query = select(StrategyActionModel)
+            if strategy_name is not None:
+                query = query.where(StrategyActionModel.strategy_name == strategy_name)
+            if action_type is not None:
+                query = query.where(StrategyActionModel.action_type == action_type)
+            if since is not None:
+                query = query.where(StrategyActionModel.created_at >= since.isoformat())
+            query = query.order_by(StrategyActionModel.created_at.desc()).limit(limit)
+            result = session.execute(query)
+            models = result.scalars().all()
+            return [self._action_model_to_record(m) for m in models]
+
     def save_post(self, post: PostRecord) -> None:
         with Session(self.engine) as session:
             existing = session.get(PostModel, post.id)

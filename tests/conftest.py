@@ -302,6 +302,23 @@ class InMemoryTradingRepository(TradingRepository):
         results.sort(key=lambda a: a.created_at)
         return results[:limit]
 
+    def list_actions(
+        self,
+        strategy_name: str | None = None,
+        action_type: str | None = None,
+        since: datetime | None = None,
+        limit: int = 200,
+    ) -> list[StrategyActionRecord]:
+        results = list(self.actions.values())
+        if strategy_name is not None:
+            results = [a for a in results if a.strategy_name == strategy_name]
+        if action_type is not None:
+            results = [a for a in results if a.action_type == action_type]
+        if since is not None:
+            results = [a for a in results if a.created_at >= since]
+        results.sort(key=lambda a: a.created_at, reverse=True)
+        return results[:limit]
+
     def save_post(self, post: PostRecord) -> None:
         if self._in_transaction:
             self._temp_posts[post.id] = post

@@ -80,12 +80,25 @@ _martingale_short_strategy = MartingaleShortStrategy(
         ],
     ),
 )
-# 内容型策略：涨幅榜选币 -> 连续涨跌K线检测 -> 选 1 条生成贴文
+# 内容型策略：涨幅榜选币 -> 信号检测（连续K线/成交量放大/突破新高新低/24h暴涨暴跌）
+# -> 冷却去重 -> 选 1 条生成贴文
+from trading_service.detectors.breakout import BreakoutDetector
 from trading_service.detectors.consecutive_candle import ConsecutiveCandleDetector
+from trading_service.detectors.price_change import PriceChangeDetector
+from trading_service.detectors.volume_surge import VolumeSurgeDetector
 from trading_service.strategies.content_scan import ContentScanConfig, ContentScanStrategy
 
 _consecutive_candle_detector = ConsecutiveCandleDetector(
     repo=_trading_store, client=_micro_cap_client, interval="1d", min_streak=3,
+)
+_volume_surge_detector = VolumeSurgeDetector(
+    repo=_trading_store, client=_micro_cap_client, interval="1d", window=20, surge_ratio=3.0,
+)
+_breakout_detector = BreakoutDetector(
+    repo=_trading_store, client=_micro_cap_client, interval="1d", window=20,
+)
+_price_change_detector = PriceChangeDetector(
+    repo=_trading_store, threshold=20.0,
 )
 _content_scan_strategy = ContentScanStrategy(
     exchange=_exchange,
@@ -93,7 +106,12 @@ _content_scan_strategy = ContentScanStrategy(
     symbol_picker=SelectionPipeline(
         source=TopGainersSource(client=_micro_cap_client, top_n=20),
     ),
-    signal_detectors=[_consecutive_candle_detector],
+    signal_detectors=[
+        _consecutive_candle_detector,
+        _volume_surge_detector,
+        _breakout_detector,
+        _price_change_detector,
+    ],
 )
 
 # 贴文生成器（LLM 生成交易动态贴文，api_key 为空时自动跳过）

@@ -272,6 +272,21 @@ class TradingRepository(ABC):
         """列出某次执行的所有动作记录。"""
 
     @abstractmethod
+    def list_actions(
+        self,
+        strategy_name: str | None = None,
+        action_type: str | None = None,
+        since: datetime | None = None,
+        limit: int = 200,
+    ) -> list[StrategyActionRecord]:
+        """通用动作查询：按策略/类型/时间过滤，按 created_at 倒序返回。
+
+        用于内容型策略的冷却去重：拉取近 N 小时内某策略的 content 动作，
+        构建 (symbol, reason_data["signal_type"]) 冷却指纹集合。
+        倒序保证 limit 截断后保留的是最新的动作。
+        """
+
+    @abstractmethod
     def list_actions_by_position(self, position_id: str) -> list[StrategyActionRecord]:
         """列出某个仓位的所有动作记录（交易故事线，按时间正序）。"""
 

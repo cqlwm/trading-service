@@ -463,15 +463,22 @@ class Strategy(ABC):
 
 ### 7.4 已实现的检测器
 
-| 检测器 | name | 产出信号 |
-|--------|------|----------|
-| 技术分析信号检测器 | `technical_signal` | `golden_cross`（金叉）、`dead_cross`（死叉）、`sideways_bottom`（底部横盘）|
+| 检测器 | name | 数据来源 | 产出信号 |
+|--------|------|----------|----------|
+| 技术分析信号检测器 | `technical_signal` | 4h K线（需 TechnicalAnalysisFilter 预计算 SMA200 指标列） | `golden_cross`（金叉）、`dead_cross`（死叉）、`sideways_bottom`（底部横盘）|
+| 连续涨跌K线检测器 | `consecutive_candle` | 1d K线（自包含 OHLCV） | `consecutive_rise`（连续阳线）、`consecutive_fall`（连续阴线）|
+| 成交量放大检测器 | `volume_surge` | 1d K线 volume（自包含 OHLCV） | `volume_surge`（成交量放大）|
+| 突破新高新低检测器 | `breakout` | 1d K线 high/low（自包含 OHLCV） | `breakout_high`（突破新高）、`breakout_low`（跌破新低）|
+| 24h暴涨暴跌检测器 | `price_change` | SymbolInfo.price_change_pct_24h 现成字段（无需 K线） | `price_surge`（暴涨）、`price_plunge`（暴跌）|
+
+> 自包含检测器（直接读取 OHLCV 或现成字段）可与任意管道搭配；依赖预计算指标列的检测器（如 technical_signal）需在管道中配套对应 filter。
 
 ### 7.5 新增信号检测器步骤
 
 1. 继承 `SignalDetector`，设 `name` 类属性
 2. 实现 `detect(candidates)` 方法，接收 `list[SymbolInfo]`，返回 `list[SignalResult]`
-3. 在 `api/deps.py` 实例化，通过策略构造函数 `signal_detectors=[...]` 注入
+3. 检测器应自包含读取 OHLCV 或现成字段，不依赖管道 filter 预计算指标列（除非与 filter 配套使用）
+4. 在 `api/deps.py` 实例化，通过策略构造函数 `signal_detectors=[...]` 注入
 
 ---
 
@@ -680,19 +687,30 @@ PostStyle (ABC)
 
 ### 11.4 内容型策略 ContentScanStrategy
 
-每 10 分钟从涨幅榜选币，检测连续涨跌K线，选 1 条生成贴文：
+每 10 分钟从涨幅榜选币，运行多个信号检测器，对信号做 `(symbol, signal_type)` 粒度的
+冷却去重后，选 severity 最高的 1 条生成贴文：
 
 ```
 ContentScanStrategy.execute()
   ├─ 1. 选币：TopGainersSource（24h ticker 涨幅榜 top 20）
-  ├─ 2. 信号检测：ConsecutiveCandleDetector（拉 1d K 线，连续涨/跌 >= 3 天）
+  ├─ 2. 信号检测（4 个检测器，自包含读取 OHLCV / 现成字段）：
+  │     - ConsecutiveCandleDetector（1d K线，连续涨/跌 >= 3 天）
+  │     - VolumeSurgeDetector（1d K线 volume，放大 >= 3 倍）
+  │     - BreakoutDetector（1d K线 high/low，突破近 20 日极值）
+  │     - PriceChangeDetector（24h 涨跌幅，|change| >= 20%）
   ├─ 3. run_detectors -> 信号落盘到 trading_signals
-  ├─ 4. 选 severity 最高的 1 条信号
-  ├─ 5. 写 action_type="content" 动作记录（含 signal_ids）
-  └─ 6. 返回 [StrategyAction(type="content")]
+  ├─ 4. 冷却去重：剔除近 cooldown_hours（默认 12h）内已发过帖的 (symbol, signal_type)
+  │     冷却指纹来自 content 动作的 reason_data["signal_type"] + symbol
+  ├─ 5. 选 severity 最高（同 severity 取最新）的 1 条信号
+  ├─ 6. 写 action_type="content" 动作记录（含 signal_ids）
+  └─ 7. 返回 [StrategyAction(type="content")]
      -> scheduler 检测到 actions 非空 -> 触发 PostGenerator
      -> PostGenerator 检测到 content 类型 -> 走 ContentPostStyle
      -> 市场观察者角色 prompt -> LLM 生成贴文
 ```
+
+冷却去重解决了"同一信号每 10 分钟被反复选中、连续发同一篇帖"的问题：某个 `(symbol, signal_type)`
+在 12h 窗口内只能被选中一次。同 symbol 不同 signal_type 不受影响（各发各的），
+全部冷却中则本轮不发帖（预期降级行为）。冷却窗口通过 `ContentScanConfig.cooldown_hours` 可配置。
 
 不开仓、不平仓，纯内容产出。
