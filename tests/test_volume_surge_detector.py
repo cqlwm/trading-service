@@ -157,8 +157,22 @@ class TestVolumeSurgeDetectorSeverity:
         assert results[0].metadata["surge_ratio"] == 10.0
 
 
-class TestVolumeSurgeDetectorMultiple:
-    """多候选测试。"""
+class TestVolumeSurgeDetectorKlineCloseTime:
+    """kline_close_time 周期标识测试。"""
+
+    @pytest.mark.asyncio
+    async def test_metadata_has_kline_close_time(self, detector) -> None:
+        """✅ metadata 应含 kline_close_time，等于最新已收盘 K 线的 datetime。"""
+        candles = [(10, 11)] * 6
+        volumes = [100.0, 100.0, 100.0, 100.0, 100.0, 400.0]
+        info = make_info("BTCUSDT", candles, volumes)
+
+        results = await detector.detect([info])
+
+        assert len(results) == 1
+        assert "kline_close_time" in results[0].metadata
+        # make_klines_df 的 datetime 列是 range(n)，最后一根 = n-1 = 5
+        assert results[0].metadata["kline_close_time"] == 5
 
     @pytest.mark.asyncio
     async def test_multiple_candidates(self, detector) -> None:

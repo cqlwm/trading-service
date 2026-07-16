@@ -166,8 +166,21 @@ class TestConsecutiveCandleDetectorSeverity:
         assert results[0].metadata["streak_days"] == 7, "实际连续 7 天"
 
 
-class TestConsecutiveCandleDetectorMultiple:
-    """多候选测试。"""
+class TestConsecutiveCandleDetectorKlineCloseTime:
+    """kline_close_time 周期标识测试。"""
+
+    @pytest.mark.asyncio
+    async def test_metadata_has_kline_close_time(self, detector) -> None:
+        """✅ metadata 应含 kline_close_time，等于最新已收盘 K 线的 datetime。"""
+        candles = [(10, 11), (11, 12), (12, 13)]
+        info = make_info("BTCUSDT", candles)
+
+        results = await detector.detect([info])
+
+        assert len(results) == 1
+        assert "kline_close_time" in results[0].metadata
+        # make_klines_df 的 datetime 列是 range(n)，最后一根 = n-1 = 2
+        assert results[0].metadata["kline_close_time"] == 2
 
     @pytest.mark.asyncio
     async def test_multiple_candidates(self, detector) -> None:

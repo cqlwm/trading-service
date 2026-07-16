@@ -1,9 +1,12 @@
 """内容型策略：检测信号，选 1 条生成贴文。
 
 不开仓、不平仓。只产出信号 + content 动作记录，触发贴文生成。
-每 10 分钟从涨幅榜选币，运行信号检测器，对信号做 (symbol, signal_type) 粒度的
-冷却去重后，选 severity 最高的 1 条，写入 action_type="content" 的动作记录，
+每 10 分钟从涨幅榜选币，运行信号检测器，对信号做 (symbol, signal_type, kline_close_time)
+三元组去重后，选 severity 最高的 1 条，写入 action_type="content" 的动作记录，
 使 scheduler 触发 PostGenerator。
+
+去重机制：以信号所基于的最新已收盘 K 线收盘时间(kline_close_time)为周期标识，
+同一根 K 线期间同一 (symbol, signal_type) 只发一次；推进到下一根新 K 线才解锁。
 """
 from __future__ import annotations
 
@@ -23,11 +26,11 @@ class ContentScanConfig(StrategyConfig):
     """内容型策略配置。"""
 
     top_n: int = 20  # 涨幅榜取前 N（由 picker 的 source 控制，此处仅记录）
-    cooldown_hours: int = 12  # (symbol, signal_type) 冷却窗口，避免重复发帖
+    lookback_days: int = 7  # 去重查询安全边界（避免扫全表），真正去重由三元组相等决定
 
 
 class ContentScanStrategy(Strategy):
-    """内容型策略：检测信号，冷却去重后选 1 条生成贴文。
+    """内容型策略：检测信号，K 线周期去重后选 1 条生成贴文。
 
     不开仓、不平仓。只产出信号 + content 动作记录，触发贴文生成。
     """
@@ -46,7 +49,7 @@ class ContentScanStrategy(Strategy):
         self.config: ContentScanConfig = config
 
     async def execute(self, execution_id: str = "") -> list[StrategyAction]:
-        """执行内容扫描：选币 -> 信号检测 -> 冷却去重 -> 选 1 条 -> 写 content 动作。"""
+        """执行内容扫描：选币 -> 信号检测 -> 周期去重 -> 选 1 条 -> 写 content 动作。"""
         # 1. 选币
         candidates = await self.symbol_picker.pick()
         if not candidates:
@@ -57,8 +60,8 @@ class ContentScanStrategy(Strategy):
         if not signals:
             return []
 
-        # 3. 冷却去重：剔除近 cooldown_hours 内已发过帖的 (symbol, signal_type)
-        fresh = self._filter_cooled(signals)
+        # 3. 周期去重：剔除与历史已发帖 (symbol, signal_type, kline_close_time) 相同的信号
+        fresh = self._filter_duplicated(signals)
         if not fresh:
             return []
 
@@ -77,6 +80,7 @@ class ContentScanStrategy(Strategy):
                 "signal_type": best.signal_type,
                 "direction": best.direction,
                 "severity": best.severity,
+                "kline_close_time": best.metadata_json.get("kline_close_time"),
                 "metadata": best.metadata_json,
             },
             signal_ids=[best.id],
@@ -86,14 +90,29 @@ class ContentScanStrategy(Strategy):
         # 6. 返回非空 actions 触发 post_generator
         return [StrategyAction(type="content", symbol=best.symbol, reason=best.description)]
 
-    def _filter_cooled(self, signals: list[Any]) -> list[Any]:
-        """剔除近 cooldown_hours 内已发过帖的 (symbol, signal_type)。"""
-        since = datetime.now(timezone.utc) - timedelta(hours=self.config.cooldown_hours)
+    def _filter_duplicated(self, signals: list[Any]) -> list[Any]:
+        """剔除与历史已发帖 K 线周期相同的 (symbol, signal_type, kline_close_time)。
+
+        以信号所基于的最新已收盘 K 线收盘时间为周期标识：同一根 K 线期间同一信号
+        只发一次；推进到下一根新 K 线（kline_close_time 变化）才解锁。
+        since 仅作查询安全边界（避免扫全表），真正去重由三元组相等决定。
+        """
+        since = datetime.now(timezone.utc) - timedelta(days=self.config.lookback_days)
         recent = self.exchange.db.list_actions(
             strategy_name=self.name, action_type="content", since=since,
         )
-        cooled = {(a.symbol, a.reason_data.get("signal_type", "")) for a in recent}
-        return [s for s in signals if (s.symbol, s.signal_type) not in cooled]
+        posted = {
+            (
+                a.symbol,
+                a.reason_data.get("signal_type", ""),
+                a.reason_data.get("kline_close_time"),
+            )
+            for a in recent
+        }
+        return [
+            s for s in signals
+            if (s.symbol, s.signal_type, s.metadata_json.get("kline_close_time")) not in posted
+        ]
 
     def get_status(self) -> dict[str, Any]:
         """返回策略状态。"""
@@ -101,5 +120,5 @@ class ContentScanStrategy(Strategy):
             "strategy": self.name,
             "cron": self.cron,
             "type": "content",
-            "config": {"top_n": self.config.top_n, "cooldown_hours": self.config.cooldown_hours},
+            "config": {"top_n": self.config.top_n, "lookback_days": self.config.lookback_days},
         }

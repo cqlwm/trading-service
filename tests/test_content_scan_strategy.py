@@ -6,16 +6,16 @@
 3. 只选 1 条（不多选）
 4. action_type == "content"
 5. signal_ids 关联到信号
-6. 冷却去重：(symbol, signal_type) 在窗口内只被选中一次
-   - 同币同信号类型冷却中 -> 跳过
-   - 同币不同信号类型 -> 不受冷却影响
-   - 冷却过期 -> 仍可选中
-   - 全部冷却中 -> 返回空（降级）
-   - 冷却窗口可配置
+6. K 线周期去重：(symbol, signal_type, kline_close_time) 相同则跳过
+   - 同 K 线周期已发过 -> 跳过
+   - 新 K 线周期 -> 解锁可发
+   - 同币不同信号类型 -> 不受影响
+   - 全部已发过 -> 返回空（降级）
+   - 旧数据无 kline_close_time -> 不阻塞新发帖
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pandas as pd
 import pytest
@@ -84,17 +84,29 @@ def seed_content_action(
     *,
     symbol: str,
     signal_type: str,
-    created_at: datetime,
+    kline_close_time: int,
+    created_at: datetime | None = None,
 ) -> None:
-    """向仓库预置一条历史 content 动作（模拟该信号曾被选中发帖）。"""
+    """向仓库预置一条历史 content 动作（模拟该信号曾被选中发帖）。
+
+    kline_close_time 为发帖时信号所基于的 K 线周期标识。
+    created_at 默认为当前时间（在 lookback_days 安全边界内）。
+    """
+    if created_at is None:
+        created_at = datetime.now(timezone.utc)
     exchange.db.save_action(StrategyActionRecord(
-        id=f"seed_{symbol}_{signal_type}_{created_at.isoformat()}",
+        id=f"seed_{symbol}_{signal_type}_{kline_close_time}",
         execution_id="seed",
         strategy_name="content_scan",
         action_type="content",
         symbol=symbol,
         reason_text=f"{symbol} {signal_type}",
-        reason_data={"signal_type": signal_type, "direction": "bullish", "severity": 3},
+        reason_data={
+            "signal_type": signal_type,
+            "direction": "bullish",
+            "severity": 3,
+            "kline_close_time": kline_close_time,
+        },
         created_at=created_at,
     ))
 
@@ -192,41 +204,60 @@ class TestContentScanStrategySelection:
         assert len(db_actions) == 1, "只应写 1 条动作记录"
 
 
-class TestContentScanStrategyCooldown:
-    """冷却去重测试：(symbol, signal_type) 在窗口内只被选中一次。"""
+class TestContentScanStrategyDedup:
+    """K 线周期去重测试：(symbol, signal_type, kline_close_time) 相同则跳过。
+
+    测试用 make_klines_df 的 datetime 列为 range(n)，3 根 K 线时
+    kline_close_time = df["datetime"].iloc[-1] = 2。
+    """
 
     @pytest.mark.asyncio
-    async def test_same_symbol_signal_cooled_down(self, exchange: MockExchange) -> None:
-        """✅ 同 (symbol, signal_type) 冷却中 -> 第二次执行跳过，返回空。"""
-        # 预置：2 小时前 BTCUSDT consecutive_rise 已发帖
+    async def test_same_kline_period_skipped(self, exchange: MockExchange) -> None:
+        """✅ 同 (symbol, signal_type, kline_close_time) -> 已发过，跳过返回空。"""
+        # 3 连阳 -> kline_close_time=2，预置同周期已发帖
         seed_content_action(
             exchange, symbol="BTCUSDT", signal_type="consecutive_rise",
-            created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            kline_close_time=2,
         )
-        # 3 连阳 -> consecutive_rise（与历史同类型）
         info = make_info("BTCUSDT", [(10, 11), (11, 12), (12, 13)])
         strategy = make_strategy(exchange, [info])
 
         actions = await strategy.execute(execution_id="exec002")
 
-        assert actions == [], "冷却中的 (symbol, signal_type) 应被跳过"
+        assert actions == [], "同 K 线周期已发过的信号应被跳过"
 
     @pytest.mark.asyncio
-    async def test_same_symbol_different_signal_not_cooled(self, exchange: MockExchange) -> None:
-        """✅ 同 symbol 不同 signal_type -> 不受冷却影响，仍可选中。
+    async def test_new_kline_period_unlocks(self, exchange: MockExchange) -> None:
+        """✅ kline_close_time 不同（新 K 线）-> 可选中。"""
+        # 预置：上一根 K 线(kline_close_time=1)已发帖
+        seed_content_action(
+            exchange, symbol="BTCUSDT", signal_type="consecutive_rise",
+            kline_close_time=1,
+        )
+        # 当前最新已收盘 K 线 kline_close_time=2（3 根 K 线）
+        info = make_info("BTCUSDT", [(10, 11), (11, 12), (12, 13)])
+        strategy = make_strategy(exchange, [info])
 
-        这里用两个检测器：连续K线（已冷却）+ 暴涨暴跌（未冷却）。
-        暴涨暴跌信号应被选中。
+        actions = await strategy.execute(execution_id="exec002")
+
+        assert len(actions) == 1, "新 K 线周期应解锁"
+        assert actions[0].symbol == "BTCUSDT"
+
+    @pytest.mark.asyncio
+    async def test_same_symbol_different_signal_not_duplicated(self, exchange: MockExchange) -> None:
+        """✅ 同 symbol 不同 signal_type -> 不受去重影响，仍可选中。
+
+        连续K线（已发过）+ 暴涨暴跌（未发过），暴涨暴跌应被选中。
         """
         from trading_service.detectors.consecutive_candle import ConsecutiveCandleDetector
         from trading_service.detectors.price_change import PriceChangeDetector
 
-        # 预置：2 小时前 BTCUSDT consecutive_rise 已发帖
+        # 预置：BTCUSDT consecutive_rise 已发帖（kline_close_time=2，与当前相同）
         seed_content_action(
             exchange, symbol="BTCUSDT", signal_type="consecutive_rise",
-            created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            kline_close_time=2,
         )
-        # BTC: 3 连阳（consecutive_rise，冷却中）+ 24h 暴涨 35%（price_surge，未冷却）
+        # BTC: 3 连阳（consecutive_rise，去重命中）+ 24h 暴涨 35%（price_surge，未发过）
         info = make_info("BTCUSDT", [(10, 11), (11, 12), (12, 13)])
         info.price_change_pct_24h = 35.0
         repo = exchange.db
@@ -243,39 +274,23 @@ class TestContentScanStrategyCooldown:
 
         actions = await strategy.execute(execution_id="exec002")
 
-        assert len(actions) == 1, "应选未冷却的 price_surge"
+        assert len(actions) == 1, "应选未去重的 price_surge"
         db_actions = exchange.db.list_actions_by_execution("exec002")
         assert db_actions[0].reason_data["signal_type"] == "price_surge", (
-            "应选 price_surge 而非冷却中的 consecutive_rise"
+            "应选 price_surge 而非已发过的 consecutive_rise"
         )
 
     @pytest.mark.asyncio
-    async def test_expired_cooldown_allows_selection(self, exchange: MockExchange) -> None:
-        """✅ 冷却已过期（13h 前 > 默认 12h）-> 仍可选中。"""
-        # 预置：13 小时前 BTCUSDT consecutive_rise 已发帖（超过 12h 窗口）
+    async def test_all_duplicated_returns_empty(self, exchange: MockExchange) -> None:
+        """✅ 所有信号都已发过 -> 返回空列表（降级行为）。"""
+        # 预置：2 个币的连续上涨信号都已发帖（同 kline_close_time=2）
         seed_content_action(
             exchange, symbol="BTCUSDT", signal_type="consecutive_rise",
-            created_at=datetime.now(timezone.utc) - timedelta(hours=13),
-        )
-        info = make_info("BTCUSDT", [(10, 11), (11, 12), (12, 13)])
-        strategy = make_strategy(exchange, [info])
-
-        actions = await strategy.execute(execution_id="exec002")
-
-        assert len(actions) == 1, "冷却过期后应可选中"
-        assert actions[0].symbol == "BTCUSDT"
-
-    @pytest.mark.asyncio
-    async def test_all_cooled_returns_empty(self, exchange: MockExchange) -> None:
-        """✅ 所有信号都在冷却中 -> 返回空列表（降级行为）。"""
-        # 预置：2 个币的连续上涨信号都已发帖
-        seed_content_action(
-            exchange, symbol="BTCUSDT", signal_type="consecutive_rise",
-            created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            kline_close_time=2,
         )
         seed_content_action(
             exchange, symbol="ETHUSDT", signal_type="consecutive_rise",
-            created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            kline_close_time=2,
         )
         btc = make_info("BTCUSDT", [(10, 11), (11, 12), (12, 13)])
         eth = make_info("ETHUSDT", [(10, 11), (11, 12), (12, 13)])
@@ -283,21 +298,27 @@ class TestContentScanStrategyCooldown:
 
         actions = await strategy.execute(execution_id="exec002")
 
-        assert actions == [], "全部冷却中应返回空"
+        assert actions == [], "全部已发过应返回空"
 
     @pytest.mark.asyncio
-    async def test_cooldown_hours_configurable(self, exchange: MockExchange) -> None:
-        """✅ cooldown_hours 可配置，改为 1h 后 2h 前的记录过期。"""
-        # 预置：2 小时前 BTCUSDT consecutive_rise 已发帖
-        seed_content_action(
-            exchange, symbol="BTCUSDT", signal_type="consecutive_rise",
-            created_at=datetime.now(timezone.utc) - timedelta(hours=2),
-        )
+    async def test_legacy_action_without_kline_close_time_not_blocking(
+        self, exchange: MockExchange,
+    ) -> None:
+        """✅ 旧数据无 kline_close_time 字段 -> 不命中去重，不阻塞新发帖。"""
+        # 预置一条旧格式动作（无 kline_close_time 字段，模拟历史数据）
+        exchange.db.save_action(StrategyActionRecord(
+            id="legacy_1",
+            execution_id="legacy",
+            strategy_name="content_scan",
+            action_type="content",
+            symbol="BTCUSDT",
+            reason_text="历史贴文",
+            reason_data={"signal_type": "consecutive_rise", "direction": "bullish", "severity": 3},
+            created_at=datetime.now(timezone.utc),
+        ))
         info = make_info("BTCUSDT", [(10, 11), (11, 12), (12, 13)])
-        # cooldown_hours=1 -> 2h 前的记录已过期
-        strategy = make_strategy(exchange, [info], config=ContentScanConfig(cooldown_hours=1))
+        strategy = make_strategy(exchange, [info])
 
         actions = await strategy.execute(execution_id="exec002")
 
-        assert len(actions) == 1, "1h 窗口下 2h 前的记录应已过期"
-        assert actions[0].symbol == "BTCUSDT"
+        assert len(actions) == 1, "旧数据无 kline_close_time 不应阻塞新信号"

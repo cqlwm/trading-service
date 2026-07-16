@@ -12,6 +12,8 @@ severity = min(int(abs(change) / 10), 5)，每 10% 一级。
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from trading_service.detectors.base import SignalDetector, SignalResult
 from trading_service.pickers import SymbolInfo
 from trading_service.repository import TradingRepository
@@ -45,6 +47,14 @@ class PriceChangeDetector(SignalDetector):
         if abs(change_pct) < self._threshold:
             return None
 
+        # 周期标识：无 K 线数据，用当天 UTC 0 点时间戳(ms)作伪标识
+        # 效果：同一天内多次执行标识相同，跨 UTC 日才变（与 1d K 线语义接近）
+        kline_close_time = int(
+            datetime.now(timezone.utc)
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .timestamp() * 1000
+        )
+
         if change_pct >= self._threshold:
             return SignalResult(
                 symbol=info.symbol,
@@ -53,6 +63,7 @@ class PriceChangeDetector(SignalDetector):
                 severity=min(int(change_pct / 10), 5),
                 description=f"{info.symbol} 24h 暴涨 {change_pct:.1f}%",
                 metadata={
+                    "kline_close_time": kline_close_time,
                     "change_pct": change_pct,
                     "threshold": self._threshold,
                 },
@@ -65,6 +76,7 @@ class PriceChangeDetector(SignalDetector):
             severity=min(int(abs(change_pct) / 10), 5),
             description=f"{info.symbol} 24h 暴跌 {change_pct:.1f}%",
             metadata={
+                "kline_close_time": kline_close_time,
                 "change_pct": change_pct,
                 "threshold": self._threshold,
             },

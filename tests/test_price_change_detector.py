@@ -11,6 +11,8 @@
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from trading_service.detectors.price_change import PriceChangeDetector
@@ -122,8 +124,24 @@ class TestPriceChangeDetectorSeverity:
         assert results[0].severity == 5, "severity 应封顶 5"
 
 
-class TestPriceChangeDetectorMultiple:
-    """多候选测试。"""
+class TestPriceChangeDetectorKlineCloseTime:
+    """kline_close_time 周期标识测试（无 K线，用当天 UTC 0 点作伪标识）。"""
+
+    @pytest.mark.asyncio
+    async def test_metadata_has_kline_close_time(self, detector) -> None:
+        """✅ metadata 应含 kline_close_time，等于当天 UTC 0 点时间戳(ms)。"""
+        info = make_info("BTCUSDT", 35.0)
+
+        results = await detector.detect([info])
+
+        assert len(results) == 1
+        assert "kline_close_time" in results[0].metadata
+        expected = int(
+            datetime.now(timezone.utc)
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .timestamp() * 1000
+        )
+        assert results[0].metadata["kline_close_time"] == expected
 
     @pytest.mark.asyncio
     async def test_multiple_candidates(self, detector) -> None:

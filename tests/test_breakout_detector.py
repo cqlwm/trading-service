@@ -159,8 +159,24 @@ class TestBreakoutDetectorBoundaries:
         assert len(results) == 0
 
 
-class TestBreakoutDetectorMultiple:
-    """多候选测试。"""
+class TestBreakoutDetectorKlineCloseTime:
+    """kline_close_time 周期标识测试。"""
+
+    @pytest.mark.asyncio
+    async def test_metadata_has_kline_close_time(self, detector) -> None:
+        """✅ metadata 应含 kline_close_time，等于最新已收盘 K 线的 datetime。"""
+        # 前 5 根 high 依次 10-14，最后一根 close=20 突破前高
+        highs = [10.0, 11.0, 12.0, 13.0, 14.0, 14.0]
+        lows = [9.0, 10.0, 11.0, 12.0, 13.0, 13.0]
+        closes = [10.0, 11.0, 12.0, 13.0, 14.0, 20.0]
+        info = make_info("BTCUSDT", highs, lows, closes)
+
+        results = await detector.detect([info])
+
+        assert len(results) == 1
+        assert "kline_close_time" in results[0].metadata
+        # make_klines_df 的 datetime 列是 range(n)，最后一根 = n-1 = 5
+        assert results[0].metadata["kline_close_time"] == 5
 
     @pytest.mark.asyncio
     async def test_multiple_candidates(self, detector) -> None:

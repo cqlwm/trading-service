@@ -61,6 +61,9 @@ class BreakoutDetector(SignalDetector):
         prev_high = float(highs[-(self._window + 1):-1].max())
         prev_low = float(lows[-(self._window + 1):-1].min())
 
+        # 周期标识：最新已收盘 K 线的收盘时间(ms)，用于去重（同一根 K 线期间只发一次）
+        kline_close_time = int(df["datetime"].iloc[-1])
+
         if current_close >= prev_high:
             return SignalResult(
                 symbol=info.symbol,
@@ -69,6 +72,7 @@ class BreakoutDetector(SignalDetector):
                 severity=3,
                 description=f"{info.symbol} 突破 {self._window} 日新高",
                 metadata={
+                    "kline_close_time": kline_close_time,
                     "breakout_price": current_close,
                     "prev_high": prev_high,
                     "window": self._window,
@@ -84,6 +88,7 @@ class BreakoutDetector(SignalDetector):
                 severity=3,
                 description=f"{info.symbol} 跌破 {self._window} 日新低",
                 metadata={
+                    "kline_close_time": kline_close_time,
                     "breakout_price": current_close,
                     "prev_low": prev_low,
                     "window": self._window,

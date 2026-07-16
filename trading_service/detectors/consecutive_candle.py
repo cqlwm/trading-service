@@ -73,6 +73,9 @@ class ConsecutiveCandleDetector(SignalDetector):
         end_price = float(closes[-1])
         change_pct = ((end_price - start_price) / start_price) * 100 if start_price > 0 else 0.0
 
+        # 周期标识：最新已收盘 K 线的收盘时间(ms)，用于去重（同一根 K 线期间只发一次）
+        kline_close_time = int(df["datetime"].iloc[-1])
+
         if last_is_up:
             signal_type = "consecutive_rise"
             direction = "bullish"
@@ -89,6 +92,7 @@ class ConsecutiveCandleDetector(SignalDetector):
             severity=min(streak, 5),
             description=description,
             metadata={
+                "kline_close_time": kline_close_time,
                 "streak_days": streak,
                 "direction": direction,
                 "start_price": start_price,

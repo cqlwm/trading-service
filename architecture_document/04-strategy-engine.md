@@ -687,30 +687,34 @@ PostStyle (ABC)
 
 ### 11.4 内容型策略 ContentScanStrategy
 
-每 10 分钟从涨幅榜选币，运行多个信号检测器，对信号做 `(symbol, signal_type)` 粒度的
-冷却去重后，选 severity 最高的 1 条生成贴文：
+每 10 分钟从涨幅榜选币，运行多个信号检测器，对信号做 `(symbol, signal_type, kline_close_time)`
+三元组去重后，选 severity 最高的 1 条生成贴文：
 
 ```
 ContentScanStrategy.execute()
   ├─ 1. 选币：TopGainersSource（24h ticker 涨幅榜 top 20）
-  ├─ 2. 信号检测（4 个检测器，自包含读取 OHLCV / 现成字段）：
+  ├─ 2. 信号检测（4 个检测器，各自带 kline_close_time 周期标识）：
   │     - ConsecutiveCandleDetector（1d K线，连续涨/跌 >= 3 天）
   │     - VolumeSurgeDetector（1d K线 volume，放大 >= 3 倍）
   │     - BreakoutDetector（1d K线 high/low，突破近 20 日极值）
-  │     - PriceChangeDetector（24h 涨跌幅，|change| >= 20%）
+  │     - PriceChangeDetector（24h 涨跌幅，|change| >= 20%，无 K线用当天 UTC 0 点作标识）
   ├─ 3. run_detectors -> 信号落盘到 trading_signals
-  ├─ 4. 冷却去重：剔除近 cooldown_hours（默认 12h）内已发过帖的 (symbol, signal_type)
-  │     冷却指纹来自 content 动作的 reason_data["signal_type"] + symbol
+  ├─ 4. K 线周期去重：剔除与历史已发帖 (symbol, signal_type, kline_close_time) 相同的信号
+  │     周期标识 = 信号所基于的最新已收盘 K 线收盘时间(ms)
+  │     同一根 K 线期间同一信号只发一次，推进到下一根新 K 线才解锁
   ├─ 5. 选 severity 最高（同 severity 取最新）的 1 条信号
-  ├─ 6. 写 action_type="content" 动作记录（含 signal_ids）
+  ├─ 6. 写 action_type="content" 动作记录（含 signal_ids + kline_close_time）
   └─ 7. 返回 [StrategyAction(type="content")]
      -> scheduler 检测到 actions 非空 -> 触发 PostGenerator
      -> PostGenerator 检测到 content 类型 -> 走 ContentPostStyle
      -> 市场观察者角色 prompt -> LLM 生成贴文
 ```
 
-冷却去重解决了"同一信号每 10 分钟被反复选中、连续发同一篇帖"的问题：某个 `(symbol, signal_type)`
-在 12h 窗口内只能被选中一次。同 symbol 不同 signal_type 不受影响（各发各的），
-全部冷却中则本轮不发帖（预期降级行为）。冷却窗口通过 `ContentScanConfig.cooldown_hours` 可配置。
+K 线周期去重解决了"同一信号每 10 分钟被反复选中、连续发同一篇帖"的问题。与固定时间窗口
+不同，它把去重边界绑定到 K 线收盘边界：以 1d K 线为例，一天之内无论检测多少次（每 10 分钟
+一次），同一 `(symbol, signal_type)` 只发一次；新的一天 K 线收盘后（kline_close_time 变化）
+才解锁。各检测器用各自 interval 的 K 线收盘时间作标识（price_change 无 K 线，用当天 UTC 0 点）。
+全部已发过则本轮不发帖（预期降级行为）。查询安全边界通过 `ContentScanConfig.lookback_days`
+（默认 7 天）控制，避免扫全表。
 
 不开仓、不平仓，纯内容产出。

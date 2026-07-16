@@ -66,6 +66,9 @@ class VolumeSurgeDetector(SignalDetector):
         if ratio < self._surge_ratio:
             return None
 
+        # 周期标识：最新已收盘 K 线的收盘时间(ms)，用于去重（同一根 K 线期间只发一次）
+        kline_close_time = int(df["datetime"].iloc[-1])
+
         return SignalResult(
             symbol=info.symbol,
             signal_type="volume_surge",
@@ -73,6 +76,7 @@ class VolumeSurgeDetector(SignalDetector):
             severity=min(int(ratio), 5),
             description=f"{info.symbol} 成交量放大 {ratio:.1f} 倍",
             metadata={
+                "kline_close_time": kline_close_time,
                 "current_volume": current_volume,
                 "avg_volume": round(avg_volume, 2),
                 "surge_ratio": round(ratio, 2),
