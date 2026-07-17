@@ -9,6 +9,7 @@ import { PositionsPage } from '@/pages/PositionsPage'
 import { SignalsPage } from '@/pages/SignalsPage'
 import { StrategiesPage } from '@/pages/StrategiesPage'
 import { TimelinePage } from '@/pages/TimelinePage'
+import { SettingsProvider } from '@/providers/SettingsProvider'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,18 +24,20 @@ const queryClient = new QueryClient({
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route element={<AppShell />}>
-            <Route index element={<DashboardPage />} />
-            <Route path="positions" element={<PositionsPage />} />
-            <Route path="orders" element={<OrdersPage />} />
-            <Route path="signals" element={<SignalsPage />} />
-            <Route path="strategies" element={<StrategiesPage />} />
-            <Route path="timeline" element={<TimelinePage />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
+      <SettingsProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route index element={<DashboardPage />} />
+              <Route path="positions" element={<PositionsPage />} />
+              <Route path="orders" element={<OrdersPage />} />
+              <Route path="signals" element={<SignalsPage />} />
+              <Route path="strategies" element={<StrategiesPage />} />
+              <Route path="timeline" element={<TimelinePage />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </SettingsProvider>
       <Toaster
         theme="dark"
         position="top-right"

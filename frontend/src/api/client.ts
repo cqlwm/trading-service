@@ -1,4 +1,4 @@
-import { API_BASE, REQUEST_TIMEOUT } from '@/lib/constants'
+import { getApiBase, REQUEST_TIMEOUT } from '@/lib/constants'
 
 /** 统一 API 错误，归一化后端 {detail: string} 格式 */
 export class ApiError extends Error {
@@ -21,7 +21,7 @@ async function request<T>(path: string, options: FetchOptions = {}): Promise<T> 
   const timer = setTimeout(() => controller.abort(), timeout)
 
   try {
-    const resp = await fetch(`${API_BASE}${path}`, {
+    const resp = await fetch(`${getApiBase()}${path}`, {
       ...init,
       signal: controller.signal,
       headers: {

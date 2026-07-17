@@ -6,10 +6,12 @@ import {
   ListOrdered,
   Megaphone,
   Radio,
+  Server,
   TrendingUp,
 } from 'lucide-react'
 
 import { cn } from '@/lib/cn'
+import { useSettings } from '@/providers/SettingsProvider'
 
 const navItems: { to: string; label: string; icon: typeof Activity; end?: boolean }[] = [
   { to: '/', label: '仪表盘', icon: LayoutDashboard, end: true },
@@ -50,6 +52,24 @@ function ConnectionStatus() {
   )
 }
 
+/** 服务器切换按钮：本地 <-> 远程服务器 */
+function ServerToggle() {
+  const { target, switchTarget } = useSettings()
+  const isServer = target === 'server'
+
+  return (
+    <button
+      type="button"
+      onClick={() => switchTarget(isServer ? 'local' : 'server')}
+      className="flex w-full items-center gap-2 border-t border-border px-4 py-3 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      title={isServer ? '当前：服务器，点击切到本地' : '当前：本地，点击切到服务器'}
+    >
+      <Server size={14} className={cn('shrink-0', isServer && 'text-primary')} />
+      <span className="hidden lg:inline">{isServer ? '服务器' : '本地'}</span>
+    </button>
+  )
+}
+
 export function AppShell() {
   return (
     <div className="flex h-screen overflow-hidden">
@@ -86,6 +106,7 @@ export function AppShell() {
             )
           })}
         </nav>
+        <ServerToggle />
         <ConnectionStatus />
       </aside>
 
