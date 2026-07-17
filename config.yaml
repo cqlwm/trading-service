@@ -28,7 +28,6 @@ binance_api_secret: ""
 
 # postx 发布配置（发布到 Binance Square，依赖 binance-service 包）
 # postx_enabled: false
-# postx_storage_state_path: "~/.binance-service/storage_state.json"
-# postx_headless: true
+# postx_config_path: "/Users/li/projects/binance-service/config.yaml"
 # postx_timeframe: "1h"
 # postx_debug: false

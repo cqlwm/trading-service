@@ -2,6 +2,7 @@
 
 封装 binance_service.BinanceService，提供线程安全的 postx 发布能力。
 设计要点：
+- 配置外置：通过 binance-service 的 config.yaml 加载完整 AppConfig（chrome/poster/screenshot 等）
 - 懒加载：首次发布时才启动浏览器，避免启动即要求 storage_state 存在
 - 线程安全：Playwright 同步 API 非线程安全，用 threading.Lock 串行化
 - 单例复用：全局一个 BinanceService，多次发布共用浏览器，storage_state 自动续期
@@ -13,8 +14,7 @@ import logging
 import threading
 from typing import Protocol, runtime_checkable
 
-from binance_service import AppConfig, BinanceService, ChromeConfig
-from binance_service._config import WindowConfig
+from binance_service import AppConfig, BinanceService, load_config
 
 from trading_service.utils.symbol import Symbol
 
@@ -45,32 +45,19 @@ class BinancePublisher:
 
     def __init__(
         self,
-        storage_state_path: str | None = None,
-        headless: bool = True,
+        config_path: str,
         timeframe: str = "1h",
         debug: bool = False,
     ) -> None:
-        self._storage_state_path = storage_state_path
-        self._headless = headless
+        self._config_path = config_path
         self._default_timeframe = timeframe
         self._debug = debug
         self._service: BinanceService | None = None
         self._lock = threading.Lock()
 
-    def _build_config(self) -> AppConfig:
-        """构造 binance-service AppConfig。"""
-        chrome = ChromeConfig.default()
-        if self._storage_state_path:
-            chrome = ChromeConfig(
-                storage_state_path=self._storage_state_path,
-                debug_address=chrome.debug_address,
-                debug_port=chrome.debug_port,
-            )
-        return AppConfig(
-            chrome=chrome,
-            window=WindowConfig(),
-            headless=self._headless,
-        )
+    def _load_config(self) -> AppConfig:
+        """加载 binance-service 的 AppConfig（完整配置来自 YAML 文件）。"""
+        return load_config(self._config_path)
 
     def _get_service(self) -> BinanceService:
         """懒加载并返回 BinanceService 单例（double-checked locking）。"""
@@ -79,7 +66,7 @@ class BinancePublisher:
         with self._lock:
             if self._service is not None:
                 return self._service
-            service = BinanceService(app_config=self._build_config())
+            service = BinanceService(app_config=self._load_config())
             service.open()
             self._service = service
             logger.info("BinancePublisher 浏览器已启动")
@@ -123,7 +110,7 @@ class BinancePublisher:
         """在已持锁的情况下获取/创建 service。"""
         if self._service is not None:
             return self._service
-        service = BinanceService(app_config=self._build_config())
+        service = BinanceService(app_config=self._load_config())
         service.open()
         self._service = service
         logger.info("BinancePublisher 浏览器已启动")

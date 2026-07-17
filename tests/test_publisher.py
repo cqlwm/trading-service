@@ -19,6 +19,9 @@ import pytest
 
 from trading_service.content.publisher import BinancePublisher, resolve_base_asset
 
+# binance-service 真实配置文件，用于配置加载测试（路径与 config.local.yaml 一致）
+BINANCE_CONFIG_PATH = "/Users/li/projects/binance-service/config.yaml"
+
 
 class FakeBinanceService:
     """内存版 BinanceService，记录调用并可控返回。"""
@@ -67,7 +70,7 @@ def fake_service() -> FakeBinanceService:
 
 def _make_publisher(fake_service: FakeBinanceService) -> BinancePublisher:
     """构造一个注入 fake_service 的 BinancePublisher（绕过真实浏览器）。"""
-    publisher = BinancePublisher(headless=True, timeframe="1h")
+    publisher = BinancePublisher(config_path=BINANCE_CONFIG_PATH, timeframe="1h")
     publisher._service = fake_service  # type: ignore[attr-defined]
     return publisher
 
@@ -98,7 +101,7 @@ class TestBinancePublisherLazyLoad:
     def test_publish_triggers_open(self, fake_service: FakeBinanceService) -> None:
         """✅ 首次 publish_postx 时调用 service.open()。"""
         with patch.object(BinancePublisher, "_get_service_unsafe", return_value=fake_service):
-            publisher = BinancePublisher(timeframe="1h")
+            publisher = BinancePublisher(config_path=BINANCE_CONFIG_PATH, timeframe="1h")
             publisher.publish_postx(base_asset="BTC", content="test")
 
             assert len(fake_service.postx_calls) == 1
@@ -133,7 +136,7 @@ class TestPublishPostxParameterForwarding:
 
     def test_default_timeframe_used_when_none(self, fake_service: FakeBinanceService) -> None:
         """✅ timeframe=None 时使用构造时的默认值。"""
-        publisher = BinancePublisher(timeframe="1d")
+        publisher = BinancePublisher(config_path=BINANCE_CONFIG_PATH, timeframe="1d")
         publisher._service = fake_service  # type: ignore[attr-defined]
 
         publisher.publish_postx(base_asset="BTC", content="test")
@@ -200,31 +203,48 @@ class TestBinancePublisherClose:
 
     def test_close_when_service_already_none(self) -> None:
         """✅ service 为 None 时 close() 不崩溃。"""
-        publisher = BinancePublisher()
+        publisher = BinancePublisher(config_path=BINANCE_CONFIG_PATH)
 
         publisher.close()  # 不应抛异常
 
 
 class TestBinancePublisherConfig:
-    """配置构建测试。"""
+    """配置加载测试（通过 load_config 从 binance-service 的 config.yaml 加载完整 AppConfig）。"""
 
-    def test_build_config_with_custom_storage_path(self) -> None:
-        """✅ 自定义 storage_state_path 被正确传入 AppConfig。"""
-        publisher = BinancePublisher(
-            storage_state_path="/custom/path.json",
-            headless=False,
-            timeframe="4h",
-        )
-        config = publisher._build_config()
+    def test_load_config_returns_full_appconfig(self) -> None:
+        """✅ 加载真实 config.yaml 返回含全部子段的 AppConfig。"""
+        publisher = BinancePublisher(config_path=BINANCE_CONFIG_PATH, timeframe="4h", debug=True)
+        config = publisher._load_config()
 
-        assert config.chrome.storage_state_path == "/custom/path.json"
-        assert config.headless is False
-
-    def test_build_config_uses_default_when_no_path(self) -> None:
-        """✅ 未指定 storage_state_path 时用 ChromeConfig.default()。"""
-        publisher = BinancePublisher()
-        config = publisher._build_config()
-
-        # 默认路径来自 ChromeConfig.default()，应为 ~/.binance-service/storage_state.json
-        assert "storage_state.json" in config.chrome.storage_state_path
+        # 七个子段均应加载成功
+        assert config.chrome.debug_port == 9222, f"chrome.debug_port 应为 9222，实际 {config.chrome.debug_port}"
+        assert config.window.width == 1920
         assert config.headless is True
+        assert config.browser.device_scale_factor == 2.0
+        assert config.poster.target_url.startswith("https://www.binance.com")
+        assert config.screenshot.default_timeframe == "1h"
+        assert config.cdp.retry_count == 20
+
+    def test_load_config_expands_storage_state_path(self) -> None:
+        """✅ YAML 中 storage_state_path 含 ~ 被展开为家目录。"""
+        publisher = BinancePublisher(config_path=BINANCE_CONFIG_PATH)
+        config = publisher._load_config()
+
+        assert "~" not in config.chrome.storage_state_path, "~ 应已被展开"
+        assert config.chrome.storage_state_path.endswith("storage_state.json")
+
+    def test_load_config_raises_when_file_missing(self) -> None:
+        """✅ 配置文件不存在时抛 FileNotFoundError。"""
+        publisher = BinancePublisher(config_path="/nonexistent/path/to/config.yaml")
+
+        with pytest.raises(FileNotFoundError, match="Config file not found"):
+            publisher._load_config()
+
+    def test_init_stores_timeframe_and_debug(self) -> None:
+        """✅ 构造参数 timeframe/debug 被正确保存（不触发配置加载）。"""
+        publisher = BinancePublisher(
+            config_path=BINANCE_CONFIG_PATH, timeframe="4h", debug=True,
+        )
+
+        assert publisher._default_timeframe == "4h"  # type: ignore[attr-defined]
+        assert publisher._debug is True  # type: ignore[attr-defined]

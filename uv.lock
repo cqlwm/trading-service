@@ -171,19 +171,22 @@ dependencies = [
     { name = "pillow" },
     { name = "playwright" },
     { name = "pytest-playwright" },
-    { name = "python-dotenv" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "pillow", specifier = ">=12.2.0" },
-    { name = "playwright", specifier = ">=1.60.0" },
+    { name = "pillow", specifier = ">=12.3.0" },
+    { name = "playwright", specifier = ">=1.61.0" },
     { name = "pytest-playwright", specifier = ">=0.8.0" },
-    { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pyright", specifier = ">=1.1.411" }]
+dev = [
+    { name = "pyright", specifier = ">=1.1.411" },
+    { name = "ruff", specifier = ">=0.15.21" },
+]
 
 [[package]]
 name = "build"

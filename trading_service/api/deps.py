@@ -124,8 +124,7 @@ _publisher: IPublisher | None = None
 # postx 发布器（postx_enabled 时创建，懒加载浏览器）
 if settings.postx_enabled:
     _publisher = BinancePublisher(
-        storage_state_path=settings.postx_storage_state_path or None,
-        headless=settings.postx_headless,
+        config_path=settings.postx_config_path,
         timeframe=settings.postx_timeframe,
         debug=settings.postx_debug,
     )
