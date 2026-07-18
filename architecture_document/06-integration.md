@@ -309,16 +309,84 @@ TRADING_BINANCE_API_SECRET=
 
 ---
 
-## 8. 未来演进方向
+## 8. Binance Square 发布集成
 
-### 8.1 短期优化
+### 8.1 集成概述
+
+Trading Service 在策略执行产生动作后，可选自动生成贴文并发布到 Binance Square，
+由 `trading_service/content/publisher.py` 的 `BinancePublisher` 负责。
+发布通过 `binance_service` 包驱动 Playwright 自动化操作 Binance Square 网页，
+属于**外部系统自动化集成**（非 HTTP API）。
+
+### 8.2 调用链
+
+```mermaid
+graph LR
+    S[AsyncIOScheduler] -->|await| PG[PostGenerator.generate_for_execution]
+    PG -->|asyncio.to_thread| PP[BinancePublisher.publish_postx]
+    PP -->|队列投递| W[专属 worker 线程]
+    W --> BS[BinanceService: open/create_postx/close]
+    BS --> PW[Playwright sync_api]
+    PW --> BIN[Binance Square 网页]
+
+    API[api/posts.py 手动发布] -->|asyncio.to_thread| PP
+```
+
+两个调用点共用同一个 `BinancePublisher` 单例（注入自 `api/deps.py`）：
+- `PostGenerator._try_publish`：策略定时执行后的自动发布
+- `api/posts.py` 手动发布端点
+
+### 8.3 并发模型：专属 worker 线程（关键设计）
+
+**背景问题**：Playwright sync API 是**线程绑定**的——浏览器对象绑死在
+`open()` 时的 greenlet/线程上，之后所有操作必须在同一线程发起，否则抛
+`Cannot switch to a different thread`。
+
+调用链中 `asyncio.to_thread` 使用默认线程池，worker 线程每次可能不同，
+导致首次 `open()` 在 worker-1、后续 `create_postx()` 落在 worker-2
+触发跨线程错误（间歇性出现，随调用次数上升必现）。
+
+**解决方案**：`BinancePublisher` 内部起**一条专属 worker 线程**，
+`open / create_postx / close` 全部通过 `queue.Queue` 调度到该线程执行，
+外部调用方（无论来自哪条线程）阻塞等待 `Future` 结果。
+
+| 特性 | 说明 |
+|------|------|
+| 线程亲和 | Playwright 操作固定在专属 worker 线程，规避跨线程限制 |
+| 懒启动 | worker 在首次 `publish_postx` 时启动，不提前拉起浏览器 |
+| 单例复用 | worker 内全局一个 `BinanceService`，多次发布共用浏览器 |
+| 串行化 | worker 单线程天然串行，无需额外锁保证 Playwright 调用不重叠 |
+| 异常透传 | worker 内异常通过 `Future.set_exception` 回传调用方，不污染 worker |
+| 生命周期 | `close()` 在 worker 线程内关 service 后投哨兵让 worker 退出；再 `publish` 重启 |
+
+### 8.4 容错设计
+
+- **发布失败不影响策略执行**：`scheduler._execute_strategy` 中贴文生成/发布
+  包在 `try/except` 内，异常仅记录日志（见 `scheduler.py:226-230`）。
+- **异常后 worker 可恢复**：一次 `create_postx` 异常不会终止 worker 线程，
+  后续调用仍正常调度（由 `Future` 异常透传机制保证）。
+- **close 幂等**：多次调用 `close()` 不崩溃；worker 未启动时直接关闭已注入 service。
+
+### 8.5 测试策略
+
+- 内存版 `ThreadRecordingService` 记录每次调用的线程 ID，
+  验证 `open` 与 `create_postx` 在同一条 worker 线程（核心断言）。
+- 通过 `service_factory` 注入点让 worker 内真正调用 `open()`，
+  覆盖真实创建路径的线程亲和性。
+- 并发测试验证多线程调用方都落到同一条 worker、且 `create_postx` 串行不重叠。
+
+---
+
+## 9. 未来演进方向
+
+### 9.1 短期优化
 
 - [ ] 实现 HTTP 客户端重试机制
 - [ ] SQLite WAL 模式开启
 - [ ] 调用认证（API Key）
 - [ ] 请求日志与链路追踪
 
-### 8.2 中期演进
+### 9.2 中期演进
 
 ```mermaid
 graph LR
@@ -327,7 +395,7 @@ graph LR
     C --> D[微服务完整架构]
 ```
 
-### 8.3 长期目标
+### 9.3 长期目标
 
 | 方向 | 方案 |
 |------|------|
