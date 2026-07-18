@@ -2,14 +2,18 @@
 
 当前提供手动（重新）发布贴文到 Binance Square 的端点，
 用于自动发布失败后重试，或手动触发发布。
+
+发布采用异步管道：请求入队后立即返回 202（pending），
+实际发布结果由 publisher worker 异步完成并回写 PostRecord
+（published_at / share_link / publish_error）。
+调用方通过 GET 贴文详情轮询发布结果。
 """
 from __future__ import annotations
 
-import asyncio
 import logging
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 
 from trading_service.api.deps import PublisherDep, TradingStoreDep
 from trading_service.content.publisher import resolve_base_asset
@@ -24,11 +28,12 @@ async def publish_post(
     post_id: str,
     store: TradingStoreDep,
     publisher: PublisherDep,
-) -> dict[str, str | None]:
-    """手动（重新）发布指定贴文到 Binance Square。
+) -> JSONResponse:
+    """手动（重新）发布指定贴文到 Binance Square（异步管道）。
 
-    用于自动发布失败后重试，或手动触发发布。
-    发布成功返回 share_link，失败返回 500 并记录错误。
+    请求入队后立即返回 202，实际发布由 worker 异步完成，
+    结果回写 PostRecord 的 published_at / share_link / publish_error。
+    调用方通过 GET 贴文详情轮询结果。
     """
     post = store.get_post(post_id)
     if post is None:
@@ -47,32 +52,19 @@ async def publish_post(
         )
 
     base_asset = resolve_base_asset(post.symbol)
-    try:
-        share_link = await asyncio.to_thread(
-            publisher.publish_postx,
-            base_asset=base_asset,
-            content=post.post_text,
-        )
-    except Exception as e:
-        logger.warning(f"手动发布贴文 {post_id} 失败: {e}")
-        store.update_post_publish_result(
-            post_id=post_id,
-            published_at=None,
-            share_link=None,
-            publish_error=str(e),
-        )
-        raise HTTPException(status_code=500, detail=f"发布失败: {e}")
-
-    store.update_post_publish_result(
-        post_id=post_id,
-        published_at=datetime.now(timezone.utc),
-        share_link=share_link,
-        publish_error=None,
+    publisher.enqueue(
+        publish_id=post_id,
+        base_asset=base_asset,
+        content=post.post_text,
     )
-    logger.info(f"贴文 {post_id} 手动发布成功: {share_link}")
+    logger.info(f"贴文 {post_id} 已入队 Binance Square 发布管道")
 
-    return {
-        "status": "ok",
-        "post_id": post_id,
-        "share_link": share_link,
-    }
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": "pending",
+            "post_id": post_id,
+            "publish_id": post_id,
+        },
+    )
+

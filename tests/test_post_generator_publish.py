@@ -37,28 +37,52 @@ class FakeLLMClient:
 
 
 class FakePublisher:
-    """内存版发布器：记录调用，可控成功/失败。"""
+    """内存版发布器：实现 enqueue/set_loop/close，记录调用并同步模拟回写。
+
+    新接口下 PostGenerator 只调 enqueue，回写由 publisher 回调负责。
+    测试中 FakePublisher 在 enqueue 时同步把结果回写 PostRecord
+    （模拟回调即时完成），保留对 published_at/share_link/publish_error 的断言。
+    """
 
     def __init__(
         self,
+        repo: Any,
         share_link: str = "https://www.binance.com/zh-CN/square/post/fake123",
         should_fail: bool = False,
     ) -> None:
+        self._repo = repo
         self._share_link = share_link
         self._should_fail = should_fail
         self.calls: list[dict[str, Any]] = []
 
-    def publish_postx(
-        self, base_asset: str, content: str, timeframe: str | None = None
-    ) -> str:
+    def enqueue(
+        self, publish_id: str, base_asset: str, content: str,
+        timeframe: str | None = None,
+    ) -> None:
+        from datetime import datetime, timezone
         self.calls.append({
+            "publish_id": publish_id,
             "base_asset": base_asset,
             "content": content,
             "timeframe": timeframe,
         })
         if self._should_fail:
-            raise RuntimeError("Playwright 发布失败")
-        return self._share_link
+            self._repo.update_post_publish_result(
+                post_id=publish_id,
+                published_at=None,
+                share_link=None,
+                publish_error="Playwright 发布失败",
+            )
+        else:
+            self._repo.update_post_publish_result(
+                post_id=publish_id,
+                published_at=datetime.now(timezone.utc),
+                share_link=self._share_link,
+                publish_error=None,
+            )
+
+    def set_loop(self, loop: Any) -> None:
+        pass
 
     def close(self) -> None:
         pass
@@ -146,7 +170,7 @@ class TestAutoPublishSuccess:
         """✅ 发布时 base_asset 从 symbol 正确解析（BTCUSDT -> BTC）。"""
         repo.save_action(make_action(symbol="BTCUSDT"))
         llm = FakeLLMClient(response="BTC 看涨！")
-        publisher = FakePublisher()
+        publisher = FakePublisher(repo, )
         gen = PostGenerator(
             repo=repo, posts_dir=str(posts_dir), llm_client=llm, publisher=publisher,
         )
@@ -163,7 +187,7 @@ class TestAutoPublishSuccess:
         """✅ 发布成功时 published_at / share_link 被持久化。"""
         repo.save_action(make_action(symbol="ETHUSDT"))
         llm = FakeLLMClient(response="ETH 贴文")
-        publisher = FakePublisher(share_link="https://binance.com/post/abc")
+        publisher = FakePublisher(repo, share_link="https://binance.com/post/abc")
         gen = PostGenerator(
             repo=repo, posts_dir=str(posts_dir), llm_client=llm, publisher=publisher,
         )
@@ -184,7 +208,7 @@ class TestAutoPublishSuccess:
         repo.save_action(make_action(symbol="BTCUSDT"))
         repo.save_action(make_action(symbol="ETHUSDT", reason_text="开仓 @ 3000"))
         llm = FakeLLMClient(response="贴文")
-        publisher = FakePublisher()
+        publisher = FakePublisher(repo, )
         gen = PostGenerator(
             repo=repo, posts_dir=str(posts_dir), llm_client=llm, publisher=publisher,
         )
@@ -200,7 +224,7 @@ class TestAutoPublishSuccess:
         """✅ content 风格的贴文也能被发布。"""
         repo.save_action(make_content_action(symbol="SOLUSDT"))
         llm = FakeLLMClient(response="SOL 连涨！")
-        publisher = FakePublisher()
+        publisher = FakePublisher(repo, )
         gen = PostGenerator(
             repo=repo, posts_dir=str(posts_dir), llm_client=llm, publisher=publisher,
         )
@@ -216,7 +240,7 @@ class TestAutoPublishSuccess:
         """✅ publish_timeframe 配置正确传递给 publisher。"""
         repo.save_action(make_action(symbol="BTCUSDT"))
         llm = FakeLLMClient(response="贴文")
-        publisher = FakePublisher()
+        publisher = FakePublisher(repo, )
         gen = PostGenerator(
             repo=repo, posts_dir=str(posts_dir), llm_client=llm,
             publisher=publisher, publish_timeframe="4h",
@@ -236,7 +260,7 @@ class TestAutoPublishFailure:
         """✅ 发布失败不影响贴文生成，不抛异常。"""
         repo.save_action(make_action(symbol="BTCUSDT"))
         llm = FakeLLMClient(response="BTC 贴文")
-        publisher = FakePublisher(should_fail=True)
+        publisher = FakePublisher(repo, should_fail=True)
         gen = PostGenerator(
             repo=repo, posts_dir=str(posts_dir), llm_client=llm, publisher=publisher,
         )
@@ -250,7 +274,7 @@ class TestAutoPublishFailure:
         """✅ 发布失败时 publish_error 被记录，published_at 为 None。"""
         repo.save_action(make_action(symbol="BTCUSDT"))
         llm = FakeLLMClient(response="BTC 贴文")
-        publisher = FakePublisher(should_fail=True)
+        publisher = FakePublisher(repo, should_fail=True)
         gen = PostGenerator(
             repo=repo, posts_dir=str(posts_dir), llm_client=llm, publisher=publisher,
         )
@@ -272,17 +296,24 @@ class TestAutoPublishFailure:
         repo.save_action(make_action(symbol="ETHUSDT", reason_text="开仓 @ 3000"))
         llm = FakeLLMClient(response="贴文")
         # 第一次成功，第二次失败
-        publisher = FakePublisher()
-        original_publish = publisher.publish_postx
+        publisher = FakePublisher(repo, )
+        original_enqueue = publisher.enqueue
         call_count = [0]
 
-        def flaky_publish(base_asset: str, content: str, timeframe: str | None = None) -> str:
+        def flaky_enqueue(
+            publish_id: str, base_asset: str, content: str,
+            timeframe: str | None = None,
+        ) -> None:
             call_count[0] += 1
             if call_count[0] == 2:
-                raise RuntimeError("第二次发布失败")
-            return original_publish(base_asset, content, timeframe)
+                repo.update_post_publish_result(
+                    post_id=publish_id, published_at=None,
+                    share_link=None, publish_error="第二次发布失败",
+                )
+            else:
+                original_enqueue(publish_id, base_asset, content, timeframe)
 
-        publisher.publish_postx = flaky_publish  # type: ignore[assignment]
+        publisher.enqueue = flaky_enqueue  # type: ignore[assignment]
         gen = PostGenerator(
             repo=repo, posts_dir=str(posts_dir), llm_client=llm, publisher=publisher,
         )
@@ -303,6 +334,6 @@ class TestPublisherProtocol:
 
     def test_fake_publisher_satisfies_protocol(self) -> None:
         """✅ FakePublisher 满足 IPublisher Protocol（结构化子类型）。"""
-        publisher: IPublisher = FakePublisher()  # type: ignore[assignment]
+        publisher: IPublisher = FakePublisher(None)  # type: ignore[assignment]
         # 不抛异常即通过
         assert publisher is not None

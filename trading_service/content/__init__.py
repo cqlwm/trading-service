@@ -2,7 +2,12 @@
 
 from trading_service.content.llm_client import LLMClient, create_openai_client
 from trading_service.content.post_generator import IPostGenerator, PostGenerator
-from trading_service.content.publisher import BinancePublisher, IPublisher, resolve_base_asset
+from trading_service.content.publisher import (
+    BinancePublisher,
+    IPublisher,
+    PublishCallbacks,
+    resolve_base_asset,
+)
 from trading_service.content.styles import ContentPostStyle, PostStyle, TradingPostStyle
 
 __all__ = [
@@ -14,6 +19,7 @@ __all__ = [
     "LLMClient",
     "create_openai_client",
     "IPublisher",
+    "PublishCallbacks",
     "BinancePublisher",
     "resolve_base_asset",
 ]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import Depends
@@ -16,7 +17,7 @@ from trading_service.pickers import (
     TechnicalAnalyzer,
     TopGainersSource,
 )
-from trading_service.repository import SqlalchemyTradingStore
+from trading_service.repository import SqlalchemyTradingStore, TradingRepository
 from trading_service.scheduler import StrategyScheduler
 from trading_service.strategies.martingale import MartingaleConfig, MartingaleStrategy
 from trading_service.strategies.martingale_short import MartingaleShortStrategy
@@ -25,6 +26,8 @@ from trading_service.clients import BinanceClient
 from trading_service.detectors.technical import TechnicalSignalDetector
 from trading_service.types import TradeDirection
 from trading_service.utils.symbol import Symbol
+
+logger = logging.getLogger(__name__)
 
 # 全局单例
 _trading_store = SqlalchemyTradingStore(settings.db_path)
@@ -116,18 +119,64 @@ _content_scan_strategy = ContentScanStrategy(
 
 # 贴文生成器（LLM 生成交易动态贴文，api_key 为空时自动跳过）
 from trading_service.content import PostGenerator, create_openai_client
-from trading_service.content.publisher import BinancePublisher, IPublisher
+from trading_service.content.publisher import (
+    BinancePublisher,
+    IPublisher,
+)
 
 _post_generator: PostGenerator | None = None
 _publisher: IPublisher | None = None
 
-# postx 发布器（postx_enabled 时创建，懒加载浏览器）
+
+class _PostPublishCallbacks:
+    """发布结果回调：把成功/失败异步回写 PostRecord。
+
+    回调在 asyncio 事件循环线程上执行（由 publisher 通过
+    call_soon_threadsafe 调度），可直接同步调 repo 写库。
+    """
+
+    def __init__(self, repo: TradingRepository) -> None:
+        self._repo = repo
+
+    async def on_success(self, publish_id: str, share_link: str) -> None:
+        from datetime import datetime, timezone
+        self._repo.update_post_publish_result(
+            post_id=publish_id,
+            published_at=datetime.now(timezone.utc),
+            share_link=share_link,
+            publish_error=None,
+        )
+        logger.info(f"贴文已发布到 Binance Square: {publish_id} -> {share_link}")
+
+    async def on_failure(self, publish_id: str, error: str) -> None:
+        self._repo.update_post_publish_result(
+            post_id=publish_id,
+            published_at=None,
+            share_link=None,
+            publish_error=error,
+        )
+        logger.warning(f"发布到 Binance Square 失败: {publish_id} -> {error}")
+
+
+# postx 发布器（postx_enabled 时创建，注入回写回调）
 if settings.postx_enabled:
     _publisher = BinancePublisher(
         config_path=settings.postx_config_path,
         timeframe=settings.postx_timeframe,
         debug=settings.postx_debug,
+        callbacks=_PostPublishCallbacks(_trading_store),
     )
+
+
+def set_publisher_loop() -> None:
+    """在 asyncio 事件循环线程注入 loop（lifespan 启动后调用）。
+
+    publisher worker 线程通过该 loop 把 async 回调调度回事件循环。
+    """
+    if _publisher is not None:
+        import asyncio
+        _publisher.set_loop(asyncio.get_running_loop())
+        logger.info("已为 BinancePublisher 注入事件循环")
 
 if settings.posts_enabled:
     _llm_result = create_openai_client(

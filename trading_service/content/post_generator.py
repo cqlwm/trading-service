@@ -138,31 +138,21 @@ class PostGenerator(IPostGenerator):
         return [path]
 
     def _try_publish(self, post_id: str, symbol: str, post_text: str) -> None:
-        """尝试发布到 Binance Square，成功/失败都回写 PostRecord。"""
+        """入队发布到 Binance Square（异步管道，不阻塞）。
+
+        发布结果由 publisher 全局回调异步回写 PostRecord
+        （published_at/share_link/publish_error），本方法只负责入队。
+        """
         if self._publisher is None:
             return
-        try:
-            base_asset = resolve_base_asset(symbol)
-            share_link = self._publisher.publish_postx(
-                base_asset=base_asset,
-                content=post_text,
-                timeframe=self._publish_timeframe,
-            )
-            self._repo.update_post_publish_result(
-                post_id=post_id,
-                published_at=datetime.now(timezone.utc),
-                share_link=share_link,
-                publish_error=None,
-            )
-            logger.info(f"贴文已发布到 Binance Square: {symbol} -> {share_link}")
-        except Exception as e:
-            self._repo.update_post_publish_result(
-                post_id=post_id,
-                published_at=None,
-                share_link=None,
-                publish_error=str(e),
-            )
-            logger.warning(f"发布到 Binance Square 失败（不影响贴文生成）: {e}")
+        base_asset = resolve_base_asset(symbol)
+        self._publisher.enqueue(
+            publish_id=post_id,
+            base_asset=base_asset,
+            content=post_text,
+            timeframe=self._publish_timeframe,
+        )
+        logger.info(f"贴文 {post_id} 已入队 Binance Square 发布管道")
 
     def _save_post_record(
         self,

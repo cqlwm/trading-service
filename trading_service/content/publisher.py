@@ -1,35 +1,39 @@
-"""Binance Square 发帖发布器。
-
-封装 binance_service.BinanceService，提供线程安全的 postx 发布能力。
+"""Binance Square 发帖发布器（异步管道）。
 
 并发模型（关键）：
-Playwright sync API 是**线程绑定**的——浏览器对象绑死在 `open()` 时的线程上，
-之后所有操作必须在同一线程发起，否则抛
-`Cannot switch to a different thread`。
+Playwright sync API 是**线程绑定**的--浏览器对象绑死在 `open()` 时的线程上，
+之后所有操作必须在同一线程发起，否则抛 `Cannot switch to a different thread`。
 
-调用链是 `AsyncIOScheduler -> asyncio.to_thread -> 默认线程池`，
-默认线程池的 worker 每次可能不同，导致首次 `open()` 在 worker-1、
-后续 `create_postx()` 落在 worker-2 触发跨线程错误。
+本模块用一条**专属 worker 线程**串行消费发布队列，所有 Playwright 操作
+（open / create_postx / close）都在该线程上执行，规避跨线程限制。
 
-解决：BinancePublisher 内部起**一条专属 worker 线程**，
-`open / create_postx / close` 全部通过队列调度到该线程执行，
-外部调用方（无论来自哪条线程）阻塞等待 future 结果。
-worker 在首次 `publish` 时启动，`close` 时退出；再次 `publish` 重启。
+异步管道（关键）：
+`enqueue` 入队后**立即返回**，不阻塞调用方（Playwright 截图+发帖耗时几十秒）。
+worker 完成一个任务后，通过 `loop.call_soon_threadsafe` 把 async 回调
+`on_success` / `on_failure` 调度回 asyncio 事件循环线程执行。
+调用方（PostGenerator / API）不再阻塞等待，结果由回调异步回写。
+
+浏览器释放时机（队列空触发）：
+一批密集到达的任务复用同一浏览器实例；worker 处理完一个任务后用
+`get_nowait` 尝试取下一个，取到则复用浏览器继续处理，取不到（队列排空）
+才关闭 `BinanceService` 释放 Chrome 进程。下一批任务到达时由 worker
+重新打开。避免批量入队时反复开关浏览器。
 
 设计要点：
 - 配置外置：通过 binance-service 的 config.yaml 加载完整 AppConfig
-- 懒加载：首次发布时才启动浏览器 + worker 线程
-- 线程亲和：Playwright 操作固定在专属 worker 线程（本模块核心）
-- 单例复用：worker 线程内全局一个 BinanceService，多次发布共用浏览器
-- 异常透传：worker 内异常通过 future 回传给调用方，不污染 worker
-- 异步友好：publish_postx 是同步方法，由上层通过 asyncio.to_thread 调用
+- 懒启动：首次 enqueue 时才启动 worker 线程 + 浏览器
+- 线程亲和：Playwright 操作固定在专属 worker 线程
+- 队列空才释放浏览器：一批任务复用浏览器，队列排空才关 Chrome，避免反复开关
+- 异步回调：成功/失败通过 async 回调在事件循环线程通知，不阻塞调用方
+- 失败不重试：只调 on_failure，是否重试由调用方决定
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import queue
 import threading
-from concurrent.futures import Future
+from dataclasses import dataclass
 from typing import Callable, Protocol, TypeVar, runtime_checkable
 
 from binance_service import AppConfig, BinanceService, load_config
@@ -40,20 +44,33 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-# worker 队列任务：要么是哨兵 _SHUTDOWN，要么是 (callable, future) 元组
-_ShutdownToken = object
-_WorkTask = tuple[Callable[[], object], "Future[object]"]
-_WorkItem = _ShutdownToken | _WorkTask
+
+@runtime_checkable
+class PublishCallbacks(Protocol):
+    """发布结果回调（async，在事件循环线程上执行）。"""
+
+    async def on_success(self, publish_id: str, share_link: str) -> None:
+        """发布成功：携带 publish_id 与 share_link。"""
+        ...
+
+    async def on_failure(self, publish_id: str, error: str) -> None:
+        """发布失败：携带 publish_id 与错误信息。不重试。"""
+        ...
 
 
 @runtime_checkable
 class IPublisher(Protocol):
     """发布器接口，便于测试注入 Fake 实现。"""
 
-    def publish_postx(
-        self, base_asset: str, content: str, timeframe: str | None = None
-    ) -> str:
-        """发布 postx（截图 + 发帖），成功返回 share_link，失败抛异常。"""
+    def enqueue(
+        self, publish_id: str, base_asset: str, content: str,
+        timeframe: str | None = None,
+    ) -> None:
+        """入队发布请求，立即返回（不阻塞）。结果通过回调通知。"""
+        ...
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """注入事件循环（loop 线程调用，供 worker 调度 async 回调）。"""
         ...
 
     def close(self) -> None:
@@ -61,17 +78,25 @@ class IPublisher(Protocol):
         ...
 
 
-class BinancePublisher:
-    """Binance Square 发布器（封装 binance_service.BinanceService）。
+@dataclass
+class _PublishTask:
+    """队列中的发布任务。"""
+    publish_id: str
+    base_asset: str
+    content: str
+    timeframe: str
 
-    浏览器懒加载单例 + 专属 worker 线程：首次 publish_postx 时启动 worker
-    并在 worker 内启动浏览器，close() 时关闭浏览器并让 worker 退出。
-    所有 Playwright 操作都串行地在同一条 worker 线程上执行，
-    规避 Playwright sync API 的跨线程限制。
+
+class BinancePublisher:
+    """Binance Square 异步发布器（封装 binance_service.BinanceService）。
+
+    专属 worker 线程串行消费队列，Playwright 操作固定在该线程。
+    enqueue 入队即返回；完成后通过 call_soon_threadsafe 调度 async 回调。
+    一批任务复用浏览器，队列排空才关闭 Chrome 释放进程。
     """
 
-    # worker 线程收到的哨兵任务：收到即退出循环
-    _SHUTDOWN: _ShutdownToken = object()
+    # worker 队列哨兵：收到即退出循环
+    _SHUTDOWN = object()
 
     def __init__(
         self,
@@ -79,22 +104,57 @@ class BinancePublisher:
         timeframe: str = "1h",
         debug: bool = False,
         service_factory: Callable[[], BinanceService] | None = None,
+        callbacks: PublishCallbacks | None = None,
     ) -> None:
         self._config_path = config_path
         self._default_timeframe = timeframe
         self._debug = debug
-        # _service 仅由 worker 线程读写，外部测试可注入以绕过真实浏览器
+        # _service 仅由 worker 线程读写
         self._service: BinanceService | None = None
-        # service_factory 测试注入点：worker 内创建 service 时调用（含 open）。
-        # 默认 None 时走真实路径（load_config + BinanceService + open）。
+        # service_factory 测试注入点：worker 内创建 service 时调用（含 open）
         self._service_factory = service_factory
+        self._callbacks = callbacks
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._lock = threading.Lock()
         self._worker: threading.Thread | None = None
-        self._task_queue: queue.Queue[_WorkItem] = queue.Queue()
+        self._task_queue: queue.Queue[object] = queue.Queue()
 
     def _load_config(self) -> AppConfig:
         """加载 binance-service 的 AppConfig（完整配置来自 YAML 文件）。"""
         return load_config(self._config_path)
+
+    # ── 事件循环注入 ─────────────────────────────────────────
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """注入事件循环（loop 线程调用一次，供 worker 调度 async 回调）。"""
+        self._loop = loop
+
+    # ── 对外接口：入队即返回 ─────────────────────────────────
+
+    def enqueue(
+        self, publish_id: str, base_asset: str, content: str,
+        timeframe: str | None = None,
+    ) -> None:
+        """入队发布请求，立即返回（不阻塞）。结果通过回调通知。
+
+        Args:
+            publish_id: 发布任务标识（通常为 post_id），回调回传用于关联
+            base_asset: 基础资产符号，如 "BTC"
+            content: 帖子正文
+            timeframe: K 线周期，None 时用构造时的默认值
+        """
+        tf = timeframe or self._default_timeframe
+        task = _PublishTask(
+            publish_id=publish_id, base_asset=base_asset,
+            content=content, timeframe=tf,
+        )
+        self._ensure_worker()
+        self._task_queue.put(task)
+        if self._loop is None:
+            logger.warning(
+                "enqueue 时事件循环未注入，回调将无法调度（publish_id=%s）",
+                publish_id,
+            )
 
     # ── 专属 worker 线程 ─────────────────────────────────────
 
@@ -105,7 +165,6 @@ class BinancePublisher:
         with self._lock:
             if self._worker is not None and self._worker.is_alive():
                 return
-            # 旧线程已退出，重建队列避免残留任务
             self._task_queue = queue.Queue()
             self._worker = threading.Thread(
                 target=self._worker_loop,
@@ -116,82 +175,101 @@ class BinancePublisher:
             logger.info("BinancePublisher worker 线程已启动")
 
     def _worker_loop(self) -> None:
-        """worker 线程主循环：消费任务直至收到哨兵。"""
+        """worker 线程主循环：串行消费任务直至收到哨兵。
+
+        浏览器在**队列排空**时才释放（而非每个任务后）：一批密集到达的
+        任务复用同一个浏览器实例，只在队列彻底空、无待发任务时关闭 Chrome。
+        实现方式：处理完一个任务后用 get_nowait 尝试取下一个；
+        取到则继续复用浏览器处理；取不到（队列空）则释放浏览器，
+        再阻塞 get 等待新任务。
+        """
         while True:
             task = self._task_queue.get()
             try:
                 if task is self._SHUTDOWN:
                     return
-                # 非哨兵任务：解构 (callable, future) 在本线程执行
-                assert isinstance(task, tuple)
-                func, fut = task
-                if fut.set_running_or_notify_cancel():
-                    try:
-                        result = func()
-                        fut.set_result(result)
-                    except BaseException as e:  # noqa: BLE001
-                        fut.set_exception(e)
+                assert isinstance(task, _PublishTask)
+                self._process_task(task)
+                # 处理完后排空队列中已积压的任务（复用浏览器），
+                # 直到队列空才释放浏览器
+                self._drain_queue()
             except BaseException:  # noqa: BLE001 - 防御性，不应发生
                 logger.exception("BinancePublisher worker 循环异常")
             finally:
                 if task is not self._SHUTDOWN:
                     self._task_queue.task_done()
 
-    def _submit(self, func: Callable[[], T]) -> T:
-        """把 callable 投到 worker 线程执行，阻塞等待结果（异常透传）。"""
-        self._ensure_worker()
-        fut: Future[T] = Future()
-        assert self._task_queue is not None
-        self._task_queue.put((func, fut))
-        return fut.result()
+    def _drain_queue(self) -> None:
+        """非阻塞排空已积压任务，队列空后释放浏览器。"""
+        while True:
+            try:
+                task = self._task_queue.get_nowait()
+            except queue.Empty:
+                # 队列排空：释放浏览器，等下一批任务再重建
+                self._release_service_on_worker()
+                return
+            try:
+                if task is self._SHUTDOWN:
+                    # 哨兵：放回让外层循环下次 get 时处理
+                    self._task_queue.put(self._SHUTDOWN)
+                    return
+                assert isinstance(task, _PublishTask)
+                self._process_task(task)
+            finally:
+                self._task_queue.task_done()
 
-    # ── 对外接口 ─────────────────────────────────────────────
+    def _process_task(self, task: _PublishTask) -> None:
+        """在 worker 线程内执行单个发布任务：open+postx + 调度回调。
 
-    def publish_postx(
-        self, base_asset: str, content: str, timeframe: str | None = None
-    ) -> str:
-        """同步执行 postx（截图 + 发帖），返回 share_link。
-
-        所有 Playwright 操作调度到专属 worker 线程执行，调用方阻塞等待。
-        失败时抛出异常，由调用方捕获并记录。
-
-        Args:
-            base_asset: 基础资产符号，如 "BTC"（不含 quote）
-            content: 帖子正文
-            timeframe: K 线周期，None 时用构造时的默认值
-
-        Returns:
-            Binance Square 的分享链接 share_link
-
-        Raises:
-            Exception: 截图或发帖过程中的任何错误
+        浏览器由 _drain_queue 在队列排空时统一释放，本方法不关浏览器，
+        以保证一批任务复用同一浏览器实例。
         """
-        tf = timeframe or self._default_timeframe
-        return self._submit(
-            lambda: self._publish_on_worker(
-                base_asset=base_asset, content=content, timeframe=tf
-            )
-        )
-
-    def _publish_on_worker(
-        self, base_asset: str, content: str, timeframe: str
-    ) -> str:
-        """在 worker 线程内执行：获取/创建 service + 调 create_postx。"""
         service = self._get_service_unsafe()
-        link = service.create_postx(
-            base_asset=base_asset,
-            content=content,
-            timeframe=timeframe,
-            debug=self._debug,
-        )
-        if link is None:
-            raise RuntimeError(
-                f"postx 发布返回 None（可能发帖失败或被拦截）: {base_asset}"
+        try:
+            link = service.create_postx(
+                base_asset=task.base_asset,
+                content=task.content,
+                timeframe=task.timeframe,
+                debug=self._debug,
             )
-        return link
+            if link is None:
+                self._dispatch_failure(
+                    task.publish_id,
+                    f"postx 发布返回 None（可能发帖失败或被拦截）: {task.base_asset}",
+                )
+            else:
+                self._dispatch_success(task.publish_id, link)
+        except BaseException as e:  # noqa: BLE001
+            self._dispatch_failure(task.publish_id, str(e))
+
+    # ── 回调调度：worker 线程 -> 事件循环线程 ─────────────────
+
+    def _dispatch_success(self, publish_id: str, share_link: str) -> None:
+        """把 on_success 调度到事件循环线程。"""
+        if self._callbacks is None or self._loop is None:
+            logger.warning(
+                "发布成功但回调/loop 未配置，丢弃结果（publish_id=%s, link=%s）",
+                publish_id, share_link,
+            )
+            return
+        coro = self._callbacks.on_success(publish_id, share_link)
+        self._loop.call_soon_threadsafe(asyncio.create_task, coro)
+
+    def _dispatch_failure(self, publish_id: str, error: str) -> None:
+        """把 on_failure 调度到事件循环线程。"""
+        if self._callbacks is None or self._loop is None:
+            logger.warning(
+                "发布失败但回调/loop 未配置，丢弃结果（publish_id=%s, error=%s）",
+                publish_id, error,
+            )
+            return
+        coro = self._callbacks.on_failure(publish_id, error)
+        self._loop.call_soon_threadsafe(asyncio.create_task, coro)
+
+    # ── service 生命周期（worker 线程内） ────────────────────
 
     def _get_service_unsafe(self) -> BinanceService:
-        """在 worker 线程内获取/创建 service 单例。"""
+        """在 worker 线程内获取/创建 service。"""
         if self._service is not None:
             return self._service
         if self._service_factory is not None:
@@ -203,44 +281,33 @@ class BinancePublisher:
         logger.info("BinancePublisher 浏览器已启动")
         return service
 
-    def close(self) -> None:
-        """关闭浏览器并让 worker 线程退出。可重复调用。
+    def _release_service_on_worker(self) -> None:
+        """在 worker 线程内关闭并丢弃当前 service（释放 Chrome 进程）。"""
+        if self._service is None:
+            return
+        try:
+            self._service.close()
+        except Exception as e:
+            logger.warning(f"发布后关闭 BinanceService 时异常: {e}")
+        self._service = None
+        logger.info("BinancePublisher 浏览器已释放（发布完成）")
 
-        两种情形：
-        - worker 在跑：在 worker 线程内关 service（保证线程亲和），再让 worker 退出。
-        - worker 没跑但 _service 已注入（测试直接注入场景）：
-          在当前线程关 service。无 Playwright greenlet 需要保护。
+    # ── 关闭 ─────────────────────────────────────────────────
+
+    def close(self) -> None:
+        """让 worker 线程退出。可重复调用。
+
+        worker 在跑时投哨兵；未启动时直接返回。
         """
         with self._lock:
             worker = self._worker
-            service = self._service
             if worker is None:
-                # worker 未启动：直接在当前线程关已注入的 service
-                self._close_service_in_place(service)
                 return
-            # worker 在跑：调度到 worker 线程关闭，保证 Playwright 线程亲和
-            self._submit(self._close_service_on_worker)
             self._task_queue.put(self._SHUTDOWN)
             self._worker = None
-        # 锁外 join，避免与 _ensure_worker 抢锁死锁
         worker.join(timeout=10.0)
         if worker.is_alive():
             logger.warning("BinancePublisher worker 线程未在 10s 内退出")
-
-    def _close_service_in_place(self, service: BinanceService | None) -> None:
-        """在当前线程关闭已注入但 worker 未启动的 service（测试场景）。"""
-        if service is None:
-            return
-        try:
-            service.close()
-        except Exception as e:
-            logger.warning(f"关闭 BinanceService 时异常: {e}")
-        self._service = None
-        logger.info("BinancePublisher 浏览器已关闭")
-
-    def _close_service_on_worker(self) -> None:
-        """在 worker 线程内关闭浏览器。"""
-        self._close_service_in_place(self._service)
 
 
 def resolve_base_asset(symbol: str) -> str:

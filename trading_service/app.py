@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from trading_service.api import positions, orders, signals, timeline, strategies, posts
-from trading_service.api.deps import get_strategy_scheduler, get_publisher
+from trading_service.api.deps import get_strategy_scheduler, get_publisher, set_publisher_loop
 from trading_service.config import settings
 from trading_service.migration_check import check_migrations, run_migrations
 
@@ -49,6 +49,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any, None]:
     scheduler = get_strategy_scheduler()
     await scheduler.start()
     logger.info("⏰ 策略调度器已启动")
+
+    # 为 postx 发布器注入事件循环（lifespan 在 loop 线程运行）
+    # publisher worker 通过该 loop 把 async 回调调度回事件循环
+    set_publisher_loop()
 
     yield
 
