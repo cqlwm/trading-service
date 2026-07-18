@@ -280,6 +280,49 @@ class TestFailureCallback:
         assert len(callbacks.failure) == 1
         assert "p-none" in callbacks.failure[0][0]
 
+    async def test_open_failure_does_not_kill_worker(self) -> None:
+        """✅ 开浏览器失败转 on_failure，worker 不死，后续任务继续。
+
+        回归测试：_get_service_unsafe 抛异常时（如配置错/浏览器起不来），
+        不能让异常杀死 worker 线程导致后续任务无人消费。
+        应转 on_failure，且 worker 继续服务后续任务。
+        """
+        call_count = [0]
+        ok_service = RecordingService()
+
+        def flaky_factory() -> Any:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise RuntimeError("浏览器启动失败")
+            ok_service.open()
+            return ok_service
+
+        callbacks = RecordingCallbacks()
+        callbacks.expect_failure(1)
+        publisher = BinancePublisher(
+            config_path=BINANCE_CONFIG_PATH,
+            timeframe="1h",
+            service_factory=flaky_factory,
+            callbacks=callbacks,
+        )
+        publisher.set_loop(asyncio.get_running_loop())
+        try:
+            # 第一次：开浏览器失败，应转 on_failure 而非杀 worker
+            publisher.enqueue("p-fail", "BTC", "first")
+            await callbacks.wait_failure()
+
+            # 第二次：worker 应仍存活，能正常处理新任务
+            callbacks.expect_success(1)
+            publisher.enqueue("p-ok", "ETH", "second")
+            await callbacks.wait_success()
+        finally:
+            publisher.close()
+
+        assert len(callbacks.failure) == 1, "第一次应失败回调"
+        assert callbacks.failure[0][0] == "p-fail"
+        assert len(callbacks.success) == 1, "worker 存活，第二次应成功"
+        assert callbacks.success[0][0] == "p-ok"
+
 
 class TestSerialConsumption:
     """多个 enqueue 串行消费，create_postx 不重叠。"""
@@ -374,6 +417,48 @@ class TestBrowserReleasedWhenQueueDrained:
         )
         assert service.close_calls == 2, (
             f"间隔入队应各自 close（2 次），实际 {service.close_calls} 次"
+        )
+
+
+class TestCloseResidualTasks:
+    """close 时排空队列残留任务，重启 worker 不消费过期任务。
+
+    场景：enqueue 多个任务后立即 close，worker 可能只处理了部分，
+    剩余的残留在队列里。close 应排空这些残留，重启 worker 后
+    只处理新入队的任务，不消费上个生命周期的过期任务。
+    """
+
+    async def test_residual_tasks_drained_on_close(self) -> None:
+        """✅ close 排空残留任务，重启后只处理新任务。"""
+        service = RecordingService(delay=0.3)  # 慢处理，确保 close 时有残留
+        callbacks = RecordingCallbacks()
+        publisher = _make_publisher(service, callbacks)
+        publisher.set_loop(asyncio.get_running_loop())
+
+        # 入队 3 个任务，第一个慢处理中，后两个残留
+        publisher.enqueue("p1", "BTC", "first")
+        publisher.enqueue("p2", "ETH", "second")
+        publisher.enqueue("p3", "SOL", "third")
+        # 不等处理完，立即 close（p1 可能在处理，p2/p3 残留）
+        await asyncio.sleep(0.05)
+        publisher.close()
+
+        processed_in_first_life = len(service.postx_calls)
+        # close 后队列应被排空：重启 worker 不应再看到 p2/p3
+        callbacks.expect_success(1)
+        publisher.set_loop(asyncio.get_running_loop())
+        try:
+            publisher.enqueue("p4", "BTC", "fourth")
+            await callbacks.wait_success()
+            await _wait_until(lambda: service.close_calls >= 1, timeout=2.0)
+        finally:
+            publisher.close()
+
+        # 第二个生命周期只处理了 p4，没有 p2/p3
+        new_calls = service.postx_calls[processed_in_first_life:]
+        new_ids = [c["base_asset"] for c in new_calls]
+        assert new_ids == ["BTC"], (
+            f"重启后应只处理新任务 p4，实际处理了 {new_ids}（残留未排空）"
         )
 
 
