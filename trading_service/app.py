@@ -12,11 +12,21 @@ from trading_service.api.deps import get_strategy_scheduler, get_publisher, set_
 from trading_service.config import settings
 from trading_service.migration_check import check_migrations, run_migrations
 
-logging.basicConfig(
-    level=logging.INFO if not settings.debug else logging.DEBUG,
-    format="%(asctime)s UTC %(levelname)s %(module)s.%(funcName)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+# 应用日志配置：显式给 trading_service logger 装 handler。
+# 不能用 logging.basicConfig--uvicorn 启动时已抢先配置 root logger，
+# basicConfig 检测到 root 已有 handler 会直接跳过，导致应用日志
+# （策略执行、发布、迁移等）被 root 的 level 过滤，systemd 下看不到。
+_app_logger = logging.getLogger("trading_service")
+_app_logger.setLevel(logging.DEBUG if settings.debug else logging.INFO)
+if not _app_logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter(
+        "%(asctime)s UTC %(levelname)s %(module)s.%(funcName)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    _app_logger.addHandler(_handler)
+# 不向上冒泡到 root，避免 uvicorn 的 access/error 格式与 level 干扰
+_app_logger.propagate = False
 logger = logging.getLogger(__name__)
 
 
