@@ -200,3 +200,45 @@ class TestBreakoutDetectorKlineCloseTime:
 
         assert len(results) == 1
         assert results[0].symbol == "BTCUSDT"
+
+
+class TestBreakoutDetectorDescription:
+    """description 严谨性测试：interval 可配置，表述需带 interval 而非硬编码"日"。"""
+
+    @pytest.mark.asyncio
+    async def test_breakout_high_description_contains_interval(self, repo) -> None:
+        """✅ 4h 周期突破信号 description 应含 "4h"，不能硬编码"日"。
+
+        interval 可配置（1d/4h/1h/15m），description 需严谨表达"X 根 K 线新高"而非"X 日新高"。
+        """
+        detector = BreakoutDetector(repo=repo, client=None, interval="4h", window=20)
+        highs = [10.0] * 21
+        lows = [9.0] * 21
+        closes = [10.0] * 20 + [30.0]  # 最后一根突破前 20 根高点
+        info = SymbolInfo(symbol="BTCUSDT")
+        info.klines["4h"] = make_klines_df(highs, lows, closes)
+
+        results = await detector.detect([info])
+
+        assert len(results) == 1
+        desc = results[0].description
+        assert "4h" in desc, f"description 应含 interval '4h'，实际={desc}"
+        assert "日新高" not in desc, f"description 不应硬编码'日新高'，实际={desc}"
+        assert "20" in desc, f"description 应含 window=20，实际={desc}"
+
+    @pytest.mark.asyncio
+    async def test_breakout_low_description_contains_interval(self, repo) -> None:
+        """✅ 4h 周期跌破信号 description 应含 "4h"。"""
+        detector = BreakoutDetector(repo=repo, client=None, interval="4h", window=20)
+        highs = [20.0] * 21
+        lows = [10.0] * 21
+        closes = [20.0] * 20 + [1.0]  # 最后一根跌破前 20 根低点
+        info = SymbolInfo(symbol="BTCUSDT")
+        info.klines["4h"] = make_klines_df(highs, lows, closes)
+
+        results = await detector.detect([info])
+
+        assert len(results) == 1
+        desc = results[0].description
+        assert "4h" in desc, f"description 应含 interval '4h'，实际={desc}"
+        assert "日新低" not in desc, f"description 不应硬编码'日新低'，实际={desc}"

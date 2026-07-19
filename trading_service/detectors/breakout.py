@@ -70,7 +70,7 @@ class BreakoutDetector(SignalDetector):
                 signal_type="breakout_high",
                 direction="bullish",
                 severity=3,
-                description=f"{info.symbol} 突破 {self._window} 日新高",
+                description=f"{info.symbol} {self._interval} K线周期, 突破近期 {self._window} 根K线新高",
                 metadata={
                     "kline_close_time": kline_close_time,
                     "breakout_price": current_close,
@@ -86,7 +86,7 @@ class BreakoutDetector(SignalDetector):
                 signal_type="breakout_low",
                 direction="bearish",
                 severity=3,
-                description=f"{info.symbol} 跌破 {self._window} 日新低",
+                description=f"{info.symbol} {self._interval} K线周期, 跌破近期 {self._window} 根K线新低",
                 metadata={
                     "kline_close_time": kline_close_time,
                     "breakout_price": current_close,

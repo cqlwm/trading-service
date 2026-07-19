@@ -74,7 +74,7 @@ class VolumeSurgeDetector(SignalDetector):
             signal_type="volume_surge",
             direction="bullish",
             severity=min(int(ratio), 5),
-            description=f"{info.symbol} 成交量放大 {ratio:.1f} 倍",
+            description=f"{info.symbol} {self._interval} K线周期, 成交量放大 {ratio:.2f} 倍",
             metadata={
                 "kline_close_time": kline_close_time,
                 "current_volume": current_volume,

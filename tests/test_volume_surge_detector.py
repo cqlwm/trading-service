@@ -188,3 +188,28 @@ class TestVolumeSurgeDetectorKlineCloseTime:
 
         assert len(results) == 1
         assert results[0].symbol == "BTCUSDT"
+
+
+class TestVolumeSurgeDetectorDescription:
+    """description 严谨性测试：interval 可配置，表述需带 interval。"""
+
+    @pytest.mark.asyncio
+    async def test_volume_surge_description_contains_interval(self, repo) -> None:
+        """✅ 4h 周期放量信号 description 应含 "4h"。
+
+        interval 可配置（1d/4h/1h/15m），description 需严谨表达放量周期。
+        """
+        detector = VolumeSurgeDetector(
+            repo=repo, client=None, interval="4h", window=5, surge_ratio=3.0,
+        )
+        # 6 根 K 线，前 5 根 volume=100，最后一根 volume=500（5 倍放量）
+        candles = [(10, 11)] * 6
+        volumes = [100.0] * 5 + [500.0]
+        info = SymbolInfo(symbol="BTCUSDT")
+        info.klines["4h"] = make_klines_df(candles, volumes)
+
+        results = await detector.detect([info])
+
+        assert len(results) == 1
+        desc = results[0].description
+        assert "4h" in desc, f"description 应含 interval '4h'，实际={desc}"
