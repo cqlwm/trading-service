@@ -666,9 +666,10 @@ class TestContentScanStrategyTimeframePriority:
         config: ContentScanConfig | None = None,
     ) -> ContentScanStrategy:
         """构造注入多个 interval breakout 检测器的策略。"""
+        from trading_service.detectors.base import SignalDetector
         from trading_service.detectors.breakout import BreakoutDetector
         repo = exchange.db
-        detectors = [
+        detectors: list[SignalDetector] = [
             BreakoutDetector(repo=repo, client=None, interval=iv, window=5)
             for iv in intervals
         ]
@@ -824,9 +825,10 @@ class TestContentScanStrategyMarketSnapshot:
         config: ContentScanConfig | None = None,
     ) -> ContentScanStrategy:
         """构造注入多个 interval breakout 检测器的策略。"""
+        from trading_service.detectors.base import SignalDetector
         from trading_service.detectors.breakout import BreakoutDetector
         repo = exchange.db
-        detectors = [
+        detectors: list[SignalDetector] = [
             BreakoutDetector(repo=repo, client=None, interval=iv, window=5)
             for iv in intervals
         ]

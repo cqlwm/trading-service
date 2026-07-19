@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from trading_service.detectors.base import SignalDetector
 from trading_service.exchange import MockExchange
 from trading_service.pickers import ISymbolPicker, SymbolInfo
 from trading_service.repository.abc import SignalRecord, StrategyActionRecord
@@ -55,7 +56,7 @@ class ContentScanStrategy(Strategy):
         exchange: MockExchange,
         config: ContentScanConfig,
         symbol_picker: ISymbolPicker,
-        signal_detectors: list[Any] | None = None,
+        signal_detectors: list[SignalDetector] | None = None,
     ) -> None:
         super().__init__(exchange, config, symbol_picker, signal_detectors)
         self.config: ContentScanConfig = config
@@ -168,7 +169,7 @@ class ContentScanStrategy(Strategy):
             "metadata": signal.metadata_json,
         }
 
-    def _pick_by_priority(self, signals: list[Any]) -> Any | None:
+    def _pick_by_priority(self, signals: list[SignalRecord]) -> SignalRecord | None:
         """按 timeframe_priority 降级链选 1 条信号。
 
         信号先按 metadata["interval"] 分组（缺 interval 视为 '1d'），
@@ -177,9 +178,9 @@ class ContentScanStrategy(Strategy):
         不在降级链里的 interval 不参与选择（如 ticker 默认不在链里）。
         全部 interval 都无信号 -> 返回 None。
         """
-        by_interval: dict[str, list[Any]] = {}
+        by_interval: dict[str, list[SignalRecord]] = {}
         for s in signals:
-            iv = s.metadata_json.get("interval", "1d")
+            iv = self._signal_interval(s)
             by_interval.setdefault(iv, []).append(s)
         for iv in self.config.timeframe_priority:
             group = by_interval.get(iv)
@@ -187,7 +188,13 @@ class ContentScanStrategy(Strategy):
                 return max(group, key=lambda s: (s.severity, s.created_at))
         return None
 
-    def _filter_duplicated(self, signals: list[Any]) -> list[Any]:
+    @staticmethod
+    def _signal_interval(signal: SignalRecord) -> str:
+        """读取信号的 interval，缺失或非字符串时视为 '1d'（兼容旧数据）。"""
+        iv = signal.metadata_json.get("interval", "1d")
+        return iv if isinstance(iv, str) else "1d"
+
+    def _filter_duplicated(self, signals: list[SignalRecord]) -> list[SignalRecord]:
         """剔除与历史已发帖 K 线周期相同的 (symbol, signal_type, interval, kline_close_time)。
 
         四元组去重：同一根 K 线期间同一 (symbol, signal_type, interval) 只发一次；
@@ -204,24 +211,35 @@ class ContentScanStrategy(Strategy):
         return [s for s in signals if self._signal_dedup_key(s) not in posted]
 
     @staticmethod
-    def _action_dedup_key(action: Any) -> tuple[str, str, str, Any]:
-        """历史动作的去重 key：缺 interval 视为 '1d'（兼容旧数据）。"""
+    def _action_dedup_key(
+        action: StrategyActionRecord,
+    ) -> tuple[str, str, str, object]:
+        """历史动作的去重 key：缺 interval 视为 '1d'（兼容旧数据）。
+
+        返回 (symbol, signal_type, interval, kline_close_time)。
+        interval 用 _action_interval 提取为 str；kline_close_time 保持原值（int 或 None），
+        去重只比较相等性，object 足够。
+        """
         data = action.reason_data
+        iv = data.get("interval", "1d")
         return (
             action.symbol,
-            data.get("signal_type", ""),
-            data.get("interval", "1d"),
+            str(data.get("signal_type", "")),
+            iv if isinstance(iv, str) else "1d",
             data.get("kline_close_time"),
         )
 
     @staticmethod
-    def _signal_dedup_key(signal: Any) -> tuple[str, str, str, Any]:
+    def _signal_dedup_key(
+        signal: SignalRecord,
+    ) -> tuple[str, str, str, object]:
         """信号的去重 key：缺 interval 视为 '1d'（兼容无 interval 的检测器）。"""
         meta = signal.metadata_json
+        iv = meta.get("interval", "1d")
         return (
             signal.symbol,
             signal.signal_type,
-            meta.get("interval", "1d"),
+            iv if isinstance(iv, str) else "1d",
             meta.get("kline_close_time"),
         )
 

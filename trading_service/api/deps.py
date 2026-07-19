@@ -89,6 +89,7 @@ _martingale_short_strategy = MartingaleShortStrategy(
 # 多周期复用现有检测器：每个 interval new 一组 breakout/consecutive_candle/volume_surge 实例，
 # 复用 TechnicalSignalDetector（默认 4h，依赖 SMA200 预计算列，仅 4h 可用）。
 # 盘中行情感知由 4h/1h/15m 提供，1d 信号优先级最高，ticker 兜底。
+from trading_service.detectors.base import SignalDetector
 from trading_service.detectors.breakout import BreakoutDetector
 from trading_service.detectors.consecutive_candle import ConsecutiveCandleDetector
 from trading_service.detectors.price_change import PriceChangeDetector
@@ -96,7 +97,7 @@ from trading_service.detectors.volume_surge import VolumeSurgeDetector
 from trading_service.strategies.content_scan import ContentScanConfig, ContentScanStrategy
 
 
-def _make_interval_detectors(interval: str) -> list[object]:
+def _make_interval_detectors(interval: str) -> list[SignalDetector]:
     """为指定 interval 构建一组自包含检测器（breakout/consecutive_candle/volume_surge）。
 
     复用同一 client（懒加载 + 缓存 K 线到 SymbolInfo.klines[interval]）。
@@ -115,7 +116,7 @@ def _make_interval_detectors(interval: str) -> list[object]:
     ]
 
 
-_content_scan_signal_detectors: list[object] = []
+_content_scan_signal_detectors: list[SignalDetector] = []
 # 1d（粗粒度，优先级最高）+ ticker（24h 暴涨暴跌，无 K 线）
 _content_scan_signal_detectors.extend(_make_interval_detectors("1d"))
 _content_scan_signal_detectors.append(
