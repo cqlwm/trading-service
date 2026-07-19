@@ -79,11 +79,11 @@ class ConsecutiveCandleDetector(SignalDetector):
         if last_is_up:
             signal_type = "consecutive_rise"
             direction = "bullish"
-            description = f"{info.symbol} 连续 {streak} 天上涨"
+            description = f"{info.symbol} 连续 {streak} 根K线({self._interval})上涨"
         else:
             signal_type = "consecutive_fall"
             direction = "bearish"
-            description = f"{info.symbol} 连续 {streak} 天下跌"
+            description = f"{info.symbol} 连续 {streak} 根K线({self._interval})下跌"
 
         return SignalResult(
             symbol=info.symbol,

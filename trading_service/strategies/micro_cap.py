@@ -59,7 +59,7 @@ class MicroCapStrategy(Strategy):
         # 1. 选币
         candidates = await self.symbol_picker.pick()
         # 2. 信号检测（落盘到 trading_signals）
-        await self.run_detectors(candidates, execution_id)
+        await self.run_detectors(candidates)
         # 3. 从 DB 拉取金叉信号决策
         actions.extend(await self._open_from_signals(current_count, execution_id))
         return actions

@@ -74,7 +74,7 @@ class Strategy(ABC):
         )
 
     async def run_detectors(
-        self, candidates: list[SymbolInfo], execution_id: str = ""
+        self, candidates: list[SymbolInfo]
     ) -> list[SignalRecord]:
         """运行所有信号检测器，将产出的信号落盘并返回。
 

@@ -463,15 +463,17 @@ class Strategy(ABC):
 
 ### 7.4 已实现的检测器
 
-| 检测器 | name | 数据来源 | 产出信号 |
-|--------|------|----------|----------|
-| 技术分析信号检测器 | `technical_signal` | 4h K线（需 TechnicalAnalysisFilter 预计算 SMA200 指标列） | `golden_cross`（金叉）、`dead_cross`（死叉）、`sideways_bottom`（底部横盘）|
-| 连续涨跌K线检测器 | `consecutive_candle` | 1d K线（自包含 OHLCV） | `consecutive_rise`（连续阳线）、`consecutive_fall`（连续阴线）|
-| 成交量放大检测器 | `volume_surge` | 1d K线 volume（自包含 OHLCV） | `volume_surge`（成交量放大）|
-| 突破新高新低检测器 | `breakout` | 1d K线 high/low（自包含 OHLCV） | `breakout_high`（突破新高）、`breakout_low`（跌破新低）|
-| 24h暴涨暴跌检测器 | `price_change` | SymbolInfo.price_change_pct_24h 现成字段（无需 K线） | `price_surge`（暴涨）、`price_plunge`（暴跌）|
+| 检测器 | name | 数据来源 | interval | 产出信号 |
+|--------|------|----------|----------|----------|
+| 技术分析信号检测器 | `technical_signal` | K线（需 TechnicalAnalysisFilter 预计算 SMA200 指标列） | 默认 4h（依赖配套 filter） | `golden_cross`（金叉）、`dead_cross`（死叉）、`sideways_bottom`（底部横盘）|
+| 连续涨跌K线检测器 | `consecutive_candle` | K线 OHLCV（自包含） | 可配置（1d/4h/1h/15m） | `consecutive_rise`（连续阳线）、`consecutive_fall`（连续阴线）|
+| 成交量放大检测器 | `volume_surge` | K线 volume（自包含） | 可配置（1d/4h/1h/15m） | `volume_surge`（成交量放大）|
+| 突破新高新低检测器 | `breakout` | K线 high/low（自包含） | 可配置（1d/4h/1h/15m） | `breakout_high`（突破新高）、`breakout_low`（跌破新低）|
+| 24h暴涨暴跌检测器 | `price_change` | SymbolInfo.price_change_pct_24h 现成字段（无需 K线） | 固定 `ticker`（伪标识） | `price_surge`（暴涨）、`price_plunge`（暴跌）|
 
 > 自包含检测器（直接读取 OHLCV 或现成字段）可与任意管道搭配；依赖预计算指标列的检测器（如 technical_signal）需在管道中配套对应 filter。
+>
+> **多周期复用**：自包含检测器通过 `interval` 参数实例化多份（如 content_scan 注入 1d/4h/1h/15m 四组），每条信号 metadata 携带 `interval` + `kline_close_time`，供策略层四元组去重与降级链选择。
 
 ### 7.5 新增信号检测器步骤
 
@@ -669,9 +671,15 @@ PostStyle (ABC)
 | 风格 | action_type | 上下文 | prompt 角色 | 触发策略 |
 |------|------------|--------|------------|---------|
 | `TradingPostStyle` | "trading" | 交易故事线 + 持仓 + 历史贴文 | 交易员 | 马丁做空等（open/add/close） |
-| `ContentPostStyle` | "content" | 信号详情 + 历史贴文 | 市场观察者 | ContentScanStrategy（content） |
+| `ContentPostStyle` | "content" | 市场快照（当前 symbol 多周期信号 + 实时价/时间/24h涨跌）+ 历史贴文 | 市场观察者 | ContentScanStrategy（content） |
 
 加新风格只需继承 `PostStyle`，实现 `action_type`/`build_context`/`build_prompt`，构造时传入 `styles=[...]`。
+
+**ContentPostStyle 上下文来源（优先级）**：
+1. `action.reason_data["market_snapshot"]`（新路径）：ContentScanStrategy 聚合的完整市场快照，聚焦当前 symbol 的多周期信号（不只 best）+ 实时价/时间/24h涨跌。走 reason_data 路径不依赖 `list_signals` 回读，绕开 SQL 层运行时注入字段丢失问题。
+2. 回退到 `list_signals` 反查 `action.signal_ids`（旧数据兼容）。
+
+**检测器自治约定**：每条信号的 `metadata` 就是该检测器对上下文的贡献（interval/kline_close_time/技术指标/涨跌额等）。加新检测器只需写好 `SignalResult.metadata`，自动进入 market_snapshot.signals[].metadata，prompt 自动可见，零改动扩展。
 
 ### 11.3 触发机制
 
@@ -687,34 +695,56 @@ PostStyle (ABC)
 
 ### 11.4 内容型策略 ContentScanStrategy
 
-每 10 分钟从涨幅榜选币，运行多个信号检测器，对信号做 `(symbol, signal_type, kline_close_time)`
-三元组去重后，选 severity 最高的 1 条生成贴文：
+每 10 分钟从涨幅榜选币，运行多个时间框架（1d/4h/1h/15m）的信号检测器，对信号做
+`(symbol, signal_type, interval, kline_close_time)` 四元组去重后，按 `timeframe_priority`
+降级链选 1 条生成贴文：
 
 ```
 ContentScanStrategy.execute()
   ├─ 1. 选币：TopGainersSource（24h ticker 涨幅榜 top 20）
-  ├─ 2. 信号检测（4 个检测器，各自带 kline_close_time 周期标识）：
-  │     - ConsecutiveCandleDetector（1d K线，连续涨/跌 >= 3 天）
-  │     - VolumeSurgeDetector（1d K线 volume，放大 >= 3 倍）
-  │     - BreakoutDetector（1d K线 high/low，突破近 20 日极值）
-  │     - PriceChangeDetector（24h 涨跌幅，|change| >= 20%，无 K线用当天 UTC 0 点作标识）
+  ├─ 2. 多周期信号检测（每个 interval 一组 breakout/consecutive_candle/volume_surge，
+  │     4h 额外含 technical_signal；ticker 为 price_change 24h 涨跌幅）：
+  │     - 1d/4h/1h/15m：粗→细粒度，盘中时效性由 4h/1h/15m 提供
+  │     - ticker：PriceChangeDetector（|change| >= 20%，无 K线用当天 UTC 0 点作标识）
+  │     每条信号 metadata 携带 interval + kline_close_time 周期标识
   ├─ 3. run_detectors -> 信号落盘到 trading_signals
-  ├─ 4. K 线周期去重：剔除与历史已发帖 (symbol, signal_type, kline_close_time) 相同的信号
-  │     周期标识 = 信号所基于的最新已收盘 K 线收盘时间(ms)
-  │     同一根 K 线期间同一信号只发一次，推进到下一根新 K 线才解锁
-  ├─ 5. 选 severity 最高（同 severity 取最新）的 1 条信号
-  ├─ 6. 写 action_type="content" 动作记录（含 signal_ids + kline_close_time）
+  │     override 注入 kline_close_time_str（毫秒时间戳的 ISO 字符串版，LLM 阅读用）到每条信号 metadata
+  │     current_price / current_time 不注入 signal metadata（冗余），统一放 market_snapshot 第一层
+  ├─ 4. 四元组去重：剔除与历史已发帖 (symbol, signal_type, interval, kline_close_time) 相同的信号
+  │     interval 维度解决 UTC 日界 bug：1d/4h/1h/15m 在日界收盘时间相同时不会互相误去重
+  │     旧数据缺 interval 视为 '1d'（升级前均为 1d 检测器）
+  ├─ 5. 按 timeframe_priority 降级链选 1 条：默认 ["1d","4h","1h","15m","ticker"]
+  │     逐级降级，第一个有新鲜信号的 interval 组内选 severity 最高（同 severity 取最新）
+  │     1d 优先（粗粒度信号最重要），无 1d 才看 4h，依次降级；ticker 兜底
+  │     全部 interval 都无新鲜信号 -> 本轮不发帖（预期降级行为）
+  ├─ 6. 写 action_type="content" 动作记录：
+  │     - signal_ids=[best.id] + interval + kline_close_time（去重用）
+  │     - market_snapshot：聚合完整市场观察上下文（LLM prompt 引用）
+  │       含 symbol/current_price/current_time/price_change_pct_24h + 当前 symbol 多周期信号（不只 best）
+  │       聚焦当前生成贴文的 symbol，不混入其他候选币的信号
+  │       每条信号含完整 metadata（检测器自治：各检测器贡献的指标都在）
+  │       走 reason_data 路径（不走 list_signals 回读），绕开 SQL 层运行时注入字段丢失
   └─ 7. 返回 [StrategyAction(type="content")]
      -> scheduler 检测到 actions 非空 -> 触发 PostGenerator
      -> PostGenerator 检测到 content 类型 -> 走 ContentPostStyle
-     -> 市场观察者角色 prompt -> LLM 生成贴文
+     -> 从 reason_data.market_snapshot 取上下文（旧数据回退 list_signals）
+     -> 市场观察者角色 prompt（含市场快照 + 历史贴文）-> LLM 生成贴文
 ```
 
-K 线周期去重解决了"同一信号每 10 分钟被反复选中、连续发同一篇帖"的问题。与固定时间窗口
-不同，它把去重边界绑定到 K 线收盘边界：以 1d K 线为例，一天之内无论检测多少次（每 10 分钟
-一次），同一 `(symbol, signal_type)` 只发一次；新的一天 K 线收盘后（kline_close_time 变化）
-才解锁。各检测器用各自 interval 的 K 线收盘时间作标识（price_change 无 K 线，用当天 UTC 0 点）。
-全部已发过则本轮不发帖（预期降级行为）。查询安全边界通过 `ContentScanConfig.lookback_days`
-（默认 7 天）控制，避免扫全表。
+market_snapshot 让 LLM 拥有完整市场观察上下文，而非只有选中的 1 条 best 信号。LLM 能看到多周期共振/分歧
+（1d 突破但 4h 已回调？）、实时价与 K 线收盘价的差距、当前时间（结合历史贴文感知发帖频率）。检测器自治：
+未来加 RSI 检测器，只要 metadata 里塞 rsi_value，自动进 market_snapshot.signals[].metadata，prompt 自动可见。
+
+四元组去重解决了"同一信号每 10 分钟被反复选中、连续发同一篇帖"的问题，并修复了 UTC 日界
+多周期 K 线收盘时间对齐导致的误去重。它把去重边界绑定到 K 线收盘边界：以 1d K 线为例，一天
+之内无论检测多少次（每 10 分钟一次），同一 `(symbol, signal_type, "1d")` 只发一次；新的一天
+K 线收盘后（kline_close_time 变化）才解锁。各检测器用各自 interval 的 K 线收盘时间作标识
+（price_change 无 K 线，用当天 UTC 0 点，interval="ticker"）。
+
+降级链解决了"1d 粒度太粗 + 去重锁一天"导致盘中行情感知不到的问题：4h/1h/15m 检测器缩短了
+信号周期与去重周期，盘中剧烈波动可被捕获、可被发帖；1d 优先保证粗粒度信号不被低周期噪声盖过。
+每个 interval 独立去重（四元组天然隔离），1d 被去重不影响 4h 可发。
+
+查询安全边界通过 `ContentScanConfig.lookback_days`（默认 7 天）控制，避免扫全表。
 
 不开仓、不平仓，纯内容产出。

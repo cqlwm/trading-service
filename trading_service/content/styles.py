@@ -148,7 +148,16 @@ class TradingPostStyle(PostStyle):
 
 
 class ContentPostStyle(PostStyle):
-    """内容型风格：信号上下文 + 市场观察者角色。"""
+    """内容型风格：市场快照上下文 + 市场观察者角色。
+
+    上下文来源（优先级）：
+    1. action.reason_data["market_snapshot"]（新路径，ContentScanStrategy 聚合的完整快照，
+       聚焦当前 symbol 的多周期信号 + 实时价/时间/24h涨跌；走 reason_data 不依赖 list_signals 回读）
+    2. 回退到 list_signals 反查 action.signal_ids（旧数据兼容）
+
+    检测器自治：market_snapshot.signals[].metadata 是各检测器贡献的上下文，
+    新检测器只需写好 SignalResult.metadata 即可自动进入 prompt，零改动扩展。
+    """
 
     @property
     def action_type(self) -> str:
@@ -161,7 +170,7 @@ class ContentPostStyle(PostStyle):
         execution_id: str,
         load_historical_posts: Any,
     ) -> dict[str, Any]:
-        """收集内容上下文：信号 + 历史贴文。"""
+        """收集内容上下文：市场快照 + 历史贴文。"""
         action = actions[0] if actions else None
         if action is None:
             return {
@@ -169,11 +178,35 @@ class ContentPostStyle(PostStyle):
                 "execution_id": execution_id,
                 "strategy_name": "",
                 "current_actions": [],
-                "signals": [],
+                "market_snapshot": {"signals": []},
                 "historical_posts": [],
             }
 
-        # 从 signal_ids 拉取信号详情
+        historical_posts = load_historical_posts(action.symbol)
+
+        # 优先用 reason_data.market_snapshot（新路径）；无则回退到 list_signals 反查（旧数据兼容）
+        market_snapshot = action.reason_data.get("market_snapshot")
+        if market_snapshot is None:
+            market_snapshot = self._build_legacy_market_snapshot(repo, action)
+
+        return {
+            "symbol": action.symbol,
+            "execution_id": execution_id,
+            "strategy_name": action.strategy_name,
+            "current_actions": [_action_summary(action)],
+            "market_snapshot": market_snapshot,
+            "historical_posts": historical_posts,
+        }
+
+    def _build_legacy_market_snapshot(
+        self, repo: TradingRepository, action: StrategyActionRecord,
+    ) -> dict[str, Any]:
+        """旧数据兼容：reason_data 无 market_snapshot 时，从 list_signals 反查构建快照。
+
+        旧 action 的 reason_data 只有 signal_ids，需回查信号表。
+        SQL 路径下信号 metadata 会丢失运行时注入的字段（current_price/time），
+        但旧数据本就没有这些字段，回退行为可接受。
+        """
         signals: list[dict[str, Any]] = []
         for sid in action.signal_ids:
             sig_records = repo.list_signals(symbol=action.symbol, limit=20)
@@ -184,20 +217,10 @@ class ContentPostStyle(PostStyle):
                         "direction": sr.direction,
                         "severity": sr.severity,
                         "description": sr.description,
+                        "interval": sr.metadata_json.get("interval"),
                         "metadata": sr.metadata_json,
-                        "time": sr.created_at.isoformat(),
                     })
-
-        historical_posts = load_historical_posts(action.symbol)
-
-        return {
-            "symbol": action.symbol,
-            "execution_id": execution_id,
-            "strategy_name": action.strategy_name,
-            "current_actions": [_action_summary(action)],
-            "signals": signals,
-            "historical_posts": historical_posts,
-        }
+        return {"signals": signals}
 
     def build_prompt(self, context: dict[str, Any]) -> str:
         """内容型 prompt（市场观察、趋势分析等）。"""
@@ -209,11 +232,11 @@ class ContentPostStyle(PostStyle):
 - 简短精炼（100-200字），适合社交媒体发布
 
 ## 当前观察上下文
-以下是本次市场扫描发现的信号信息。请你自行判断哪些信息适合作为贴文素材，
+以下是本次市场扫描的完整上下文信息。请你自行判断哪些信息适合作为贴文素材，
 不要简单罗列所有数据，而是提炼出有价值的市场观察。
 
-### 本次检测信号
-{json.dumps(context["signals"], ensure_ascii=False, indent=2)}
+### 市场快照
+{json.dumps(context["market_snapshot"], ensure_ascii=False, indent=2)}
 
 ### 该币种历史贴文（避免重复内容）
 {_format_historical_posts(context["historical_posts"])}

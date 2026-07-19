@@ -155,3 +155,25 @@ class TestPriceChangeDetectorKlineCloseTime:
         assert len(results) == 2
         types = {r.signal_type for r in results}
         assert types == {"price_surge", "price_plunge"}
+
+    @pytest.mark.asyncio
+    async def test_surge_has_interval_ticker(self, detector) -> None:
+        """✅ price_surge 应携带 interval='ticker'（无 K线，用 ticker 伪标识）。"""
+        info = make_info("BTCUSDT", 35.0)
+
+        results = await detector.detect([info])
+
+        assert len(results) == 1
+        assert results[0].metadata["interval"] == "ticker", (
+            "price_change 无 K线，interval 应为 'ticker' 以参与四元组去重"
+        )
+
+    @pytest.mark.asyncio
+    async def test_plunge_has_interval_ticker(self, detector) -> None:
+        """✅ price_plunge 应携带 interval='ticker'。"""
+        info = make_info("ETHUSDT", -28.0)
+
+        results = await detector.detect([info])
+
+        assert len(results) == 1
+        assert results[0].metadata["interval"] == "ticker"

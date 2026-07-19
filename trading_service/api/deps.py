@@ -83,38 +83,57 @@ _martingale_short_strategy = MartingaleShortStrategy(
         ],
     ),
 )
-# 内容型策略：涨幅榜选币 -> 信号检测（连续K线/成交量放大/突破新高新低/24h暴涨暴跌）
-# -> 冷却去重 -> 选 1 条生成贴文
+# 内容型策略：涨幅榜选币 -> 多周期信号检测（1d/4h/1h/15m + 24h暴涨暴跌）
+# -> 四元组去重 -> 按 timeframe_priority 降级链选 1 条生成贴文
+#
+# 多周期复用现有检测器：每个 interval new 一组 breakout/consecutive_candle/volume_surge 实例，
+# 复用 TechnicalSignalDetector（默认 4h，依赖 SMA200 预计算列，仅 4h 可用）。
+# 盘中行情感知由 4h/1h/15m 提供，1d 信号优先级最高，ticker 兜底。
 from trading_service.detectors.breakout import BreakoutDetector
 from trading_service.detectors.consecutive_candle import ConsecutiveCandleDetector
 from trading_service.detectors.price_change import PriceChangeDetector
 from trading_service.detectors.volume_surge import VolumeSurgeDetector
 from trading_service.strategies.content_scan import ContentScanConfig, ContentScanStrategy
 
-_consecutive_candle_detector = ConsecutiveCandleDetector(
-    repo=_trading_store, client=_micro_cap_client, interval="1d", min_streak=3,
+
+def _make_interval_detectors(interval: str) -> list[object]:
+    """为指定 interval 构建一组自包含检测器（breakout/consecutive_candle/volume_surge）。
+
+    复用同一 client（懒加载 + 缓存 K 线到 SymbolInfo.klines[interval]）。
+    """
+    return [
+        ConsecutiveCandleDetector(
+            repo=_trading_store, client=_micro_cap_client, interval=interval, min_streak=3,
+        ),
+        VolumeSurgeDetector(
+            repo=_trading_store, client=_micro_cap_client,
+            interval=interval, window=20, surge_ratio=3.0,
+        ),
+        BreakoutDetector(
+            repo=_trading_store, client=_micro_cap_client, interval=interval, window=20,
+        ),
+    ]
+
+
+_content_scan_signal_detectors: list[object] = []
+# 1d（粗粒度，优先级最高）+ ticker（24h 暴涨暴跌，无 K 线）
+_content_scan_signal_detectors.extend(_make_interval_detectors("1d"))
+_content_scan_signal_detectors.append(
+    PriceChangeDetector(repo=_trading_store, threshold=20.0)
 )
-_volume_surge_detector = VolumeSurgeDetector(
-    repo=_trading_store, client=_micro_cap_client, interval="1d", window=20, surge_ratio=3.0,
-)
-_breakout_detector = BreakoutDetector(
-    repo=_trading_store, client=_micro_cap_client, interval="1d", window=20,
-)
-_price_change_detector = PriceChangeDetector(
-    repo=_trading_store, threshold=20.0,
-)
+# 4h/1h/15m（盘中时效性）+ 4h technical（复用 martingale 的实例，依赖 SMA200 预计算列）
+_content_scan_signal_detectors.extend(_make_interval_detectors("4h"))
+_content_scan_signal_detectors.append(_technical_signal_detector)
+_content_scan_signal_detectors.extend(_make_interval_detectors("1h"))
+_content_scan_signal_detectors.extend(_make_interval_detectors("15m"))
+
 _content_scan_strategy = ContentScanStrategy(
     exchange=_exchange,
     config=ContentScanConfig(),
     symbol_picker=SelectionPipeline(
         source=TopGainersSource(client=_micro_cap_client, top_n=20),
     ),
-    signal_detectors=[
-        _consecutive_candle_detector,
-        _volume_surge_detector,
-        _breakout_detector,
-        _price_change_detector,
-    ],
+    signal_detectors=_content_scan_signal_detectors,
 )
 
 # 贴文生成器（LLM 生成交易动态贴文，api_key 为空时自动跳过）

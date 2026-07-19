@@ -123,7 +123,7 @@ class MartingaleStrategy(Strategy):
         actions: list[StrategyAction] = []
         symbol_infos = await self.symbol_picker.pick()
         # 运行信号检测器（如果有），信号落盘供其他策略或内容生成使用
-        await self.run_detectors(symbol_infos, execution_id)
+        await self.run_detectors(symbol_infos)
         positions = self.exchange.get_positions(tag=self.name, status="open")
         occupied_symbols = {p.symbol for p in positions}
         available_infos = [s for s in symbol_infos if s.symbol not in occupied_symbols]

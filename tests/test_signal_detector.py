@@ -137,6 +137,58 @@ class TestTechnicalSignalDetector:
         results = await detector.detect([])
         assert len(results) == 0
 
+    @pytest.mark.asyncio
+    async def test_golden_cross_has_interval_and_kline_close_time(
+        self, exchange: MockExchange,
+    ) -> None:
+        """✅ 金叉信号应携带 interval 与 kline_close_time，供四元组去重使用。"""
+        detector = TechnicalSignalDetector(repo=exchange.db)
+        candidates = [make_info(
+            "BTCUSDT", cross_signal=CrossSignalType.GOLDEN,
+            sma_200=50000, price_vs_sma200_percent=2.5,
+        )]
+
+        results = await detector.detect(candidates)
+
+        assert len(results) == 1
+        assert results[0].metadata["interval"] == "4h", (
+            "technical 信号应携带 interval='4h' 用于四元组去重"
+        )
+        assert "kline_close_time" in results[0].metadata, (
+            "technical 信号应携带 kline_close_time（最新已收盘 4h K 线收盘时间）"
+        )
+
+    @pytest.mark.asyncio
+    async def test_dead_cross_has_interval_and_kline_close_time(
+        self, exchange: MockExchange,
+    ) -> None:
+        """✅ 死叉信号应携带 interval 与 kline_close_time。"""
+        detector = TechnicalSignalDetector(repo=exchange.db)
+        candidates = [make_info(
+            "ETHUSDT", cross_signal=CrossSignalType.DEAD,
+            sma_200=3000, price_vs_sma200_percent=-3.0,
+        )]
+
+        results = await detector.detect(candidates)
+
+        assert len(results) == 1
+        assert results[0].metadata["interval"] == "4h"
+        assert "kline_close_time" in results[0].metadata
+
+    @pytest.mark.asyncio
+    async def test_sideways_bottom_has_interval_and_kline_close_time(
+        self, exchange: MockExchange,
+    ) -> None:
+        """✅ 横盘信号应携带 interval 与 kline_close_time。"""
+        detector = TechnicalSignalDetector(repo=exchange.db)
+        candidates = [make_info("SOLUSDT", is_sideways_bottom=True, volatility_10=0.05)]
+
+        results = await detector.detect(candidates)
+
+        assert len(results) == 1
+        assert results[0].metadata["interval"] == "4h"
+        assert "kline_close_time" in results[0].metadata
+
 
 class TestDetectorAsStrategyComponent:
     """测试检测器作为策略组件被 run_detectors 调用。"""

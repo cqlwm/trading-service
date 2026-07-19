@@ -38,6 +38,7 @@ class TechnicalSignalDetector(SignalDetector):
         results: list[SignalResult] = []
         for info in candidates:
             cross, price_vs_sma, sma_200, is_sideways, volatility = self._read_indicators(info)
+            kline_meta = self._kline_meta(info)
 
             if cross == CrossSignalType.GOLDEN.value:
                 results.append(SignalResult(
@@ -47,6 +48,7 @@ class TechnicalSignalDetector(SignalDetector):
                     severity=3,
                     description=f"{info.symbol} 金叉向上穿越 SMA200",
                     metadata={
+                        **kline_meta,
                         "cross_signal": cross,
                         "price_vs_sma200": price_vs_sma,
                         "sma_200": sma_200,
@@ -60,6 +62,7 @@ class TechnicalSignalDetector(SignalDetector):
                     severity=3,
                     description=f"{info.symbol} 死叉向下穿越 SMA200",
                     metadata={
+                        **kline_meta,
                         "cross_signal": cross,
                         "price_vs_sma200": price_vs_sma,
                         "sma_200": sma_200,
@@ -72,9 +75,23 @@ class TechnicalSignalDetector(SignalDetector):
                     direction="neutral",
                     severity=2,
                     description=f"{info.symbol} 底部横盘",
-                    metadata={"volatility_10": volatility},
+                    metadata={**kline_meta, "volatility_10": volatility},
                 ))
         return results
+
+    def _kline_meta(self, info: SymbolInfo) -> dict[str, object]:
+        """返回去重所需的 K 线周期标识：interval + 最新已收盘 K 线收盘时间(ms)。
+
+        数据缺失时返回空 dict，由调用方 spread 进 metadata（缺失视为 None，
+        content_scan 去重时 interval 缺失兜底为 '1d'）。
+        """
+        df = ensure_klines(info, _DEFAULT_INTERVAL, self._client)
+        if df is None or len(df) == 0:
+            return {"interval": _DEFAULT_INTERVAL}
+        return {
+            "interval": _DEFAULT_INTERVAL,
+            "kline_close_time": int(df["datetime"].iloc[-1]),
+        }
 
     def _read_indicators(
         self, info: SymbolInfo,

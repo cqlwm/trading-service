@@ -26,7 +26,7 @@ class TopGainersSource(ISymbolSource):
         self,
         client: BinanceClient,
         top_n: int = 20,
-        min_quote_volume: float = 10_000_000,
+        min_quote_volume: float = 1_000_000,
     ) -> None:
         self._client = client
         self._top_n = top_n
@@ -67,6 +67,6 @@ class TopGainersSource(ISymbolSource):
 
         logger.info(
             f"涨幅榜 Top {len(result)}: "
-            + ", ".join(f"{r.symbol}({r.price_change_pct_24h:.1f}%)" for r in result[:5])
+            + ", ".join(f"{r.symbol}({r.price_change_pct_24h}%)" for r in result)
         )
         return result

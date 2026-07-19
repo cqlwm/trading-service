@@ -63,6 +63,7 @@ class PriceChangeDetector(SignalDetector):
                 severity=min(int(change_pct / 10), 5),
                 description=f"{info.symbol} 24h 暴涨 {change_pct:.1f}%",
                 metadata={
+                    "interval": "ticker",
                     "kline_close_time": kline_close_time,
                     "change_pct": change_pct,
                     "threshold": self._threshold,
@@ -76,6 +77,7 @@ class PriceChangeDetector(SignalDetector):
             severity=min(int(abs(change_pct) / 10), 5),
             description=f"{info.symbol} 24h 暴跌 {change_pct:.1f}%",
             metadata={
+                "interval": "ticker",
                 "kline_close_time": kline_close_time,
                 "change_pct": change_pct,
                 "threshold": self._threshold,
