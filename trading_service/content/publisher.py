@@ -34,7 +34,7 @@ import logging
 import queue
 import threading
 from dataclasses import dataclass
-from typing import Callable, Protocol, TypeVar, runtime_checkable
+from typing import Callable, Protocol, runtime_checkable
 
 from binance_service import AppConfig, BinanceService, load_config
 
@@ -42,8 +42,7 @@ from trading_service.utils.symbol import Symbol
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar("T")
-
+_LOCK = threading.Lock()
 
 @runtime_checkable
 class PublishCallbacks(Protocol):
@@ -115,7 +114,6 @@ class BinancePublisher:
         self._service_factory = service_factory
         self._callbacks = callbacks
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._lock = threading.Lock()
         self._worker: threading.Thread | None = None
         self._task_queue: queue.Queue[object] = queue.Queue()
 
@@ -167,15 +165,18 @@ class BinancePublisher:
         """
         if self._worker is not None and self._worker.is_alive():
             return
-        with self._lock:
+        with _LOCK:
             if self._worker is not None and self._worker.is_alive():
                 return
-            self._worker = threading.Thread(
+
+            t = threading.Thread(
                 target=self._worker_loop,
                 name="BinancePublisherWorker",
                 daemon=True,
             )
-            self._worker.start()
+            t.start()
+
+            self._worker = t
             logger.info("BinancePublisher worker 线程已启动")
 
     def _worker_loop(self) -> None:
@@ -290,7 +291,7 @@ class BinancePublisher:
         （旧 worker 已死，单线程操作队列安全），并释放可能残留的浏览器。
         队列对象终身不变，避免 _ensure_worker 重建队列导致的新旧 worker 竞态。
         """
-        with self._lock:
+        with _LOCK:
             worker = self._worker
             if worker is None:
                 return
