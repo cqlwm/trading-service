@@ -230,8 +230,11 @@ class BinancePublisher:
                 )
             else:
                 self._dispatch_success(task.publish_id, link)
-        except BaseException as e:  # noqa: BLE001
+        except Exception as e:
+            logger.exception("_process_task")
+            self._release_service_on_worker()
             self._dispatch_failure(task.publish_id, str(e))
+
     # ── 回调调度：worker 线程 -> 事件循环线程 ─────────────────
 
     def _dispatch_success(self, publish_id: str, share_link: str) -> None:
