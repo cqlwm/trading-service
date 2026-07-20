@@ -24,6 +24,10 @@ cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Trading Service
 After=network.target
+# watchdog 超时导致 os._exit(1) 后 systemd 自动拉起；5 分钟内重启超 3 次
+# 则停止重启，等人工介入（防 Chrome 系统性卡死进入循环重启）
+StartLimitIntervalSec=300
+StartLimitBurst=3
 
 [Service]
 User=$RUN_USER

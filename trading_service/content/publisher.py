@@ -31,8 +31,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import queue
 import threading
+import time
 from dataclasses import dataclass
 from typing import Callable, Protocol, runtime_checkable
 
@@ -85,6 +87,19 @@ class _PublishTask:
     content: str
     timeframe: str
 
+def _timeout_exit(timeout: float, function) -> threading.Timer:
+    timed_out = threading.Event()
+    def _on_timeout() -> None:
+        if timed_out.is_set():
+            return
+        timed_out.set()
+        function()
+        time.sleep(0.5)
+        os._exit(1)
+    timer = threading.Timer(timeout, _on_timeout)
+    timer.daemon = True
+    timer.start()
+    return timer
 
 class BinancePublisher:
     """Binance Square 异步发布器（封装 binance_service.BinanceService）。
@@ -92,10 +107,25 @@ class BinancePublisher:
     专属 worker 线程串行消费队列，Playwright 操作固定在该线程。
     enqueue 入队即返回；完成后通过 call_soon_threadsafe 调度 async 回调。
     一批任务复用浏览器，队列排空才关闭 Chrome 释放进程。
+
+    watchdog（任务级超时）：
+    单个发布任务有最大耗时上限 ``task_timeout_s``（默认 180s）。Playwright
+    sync API 在 CDP 通道阻塞时会无限挂住（如 page.evaluate 不受 default
+    timeout 约束），worker 线程会静默卡死。watchdog 用 threading.Timer 在
+    超时后调 os._exit(1) 终止整个进程，由 systemd（Restart=always）10s 后
+    自动拉起重启。比拿 Playwright 私有属性强杀 Chrome PID 更简单粗暴，但
+    彻底干净——卡死状态、孤儿 Chrome、泄漏资源全清掉。dispatch on_failure
+    在 os._exit 之前发出并短暂等待事件循环跑完（不保证 100% 投递，进程硬
+    终止时回调可能丢）。重启后队列剩余任务会丢失（发帖业务可接受，人工
+    补发）。systemd 配 StartLimitBurst 防系统性卡死进入循环重启。
     """
 
-    # worker 队列哨兵：收到即退出循环
-    _SHUTDOWN = object()
+    # 默认任务超时：3 分钟。截图+发帖正常 30s 内完成，3 分钟足够宽容，
+    # 超过则视为卡死，os._exit(1) 让 systemd 重启服务。
+    _DEFAULT_TASK_TIMEOUT_S: float = 180.0
+
+    # close 时等 worker 退出的 join 超时，超时后强杀 Chrome 解阻塞。
+    _DEFAULT_CLOSE_JOIN_TIMEOUT_S: float = 10.0
 
     def __init__(
         self,
@@ -104,6 +134,8 @@ class BinancePublisher:
         debug: bool = False,
         service_factory: Callable[[], BinanceService] | None = None,
         callbacks: PublishCallbacks | None = None,
+        task_timeout_s: float = _DEFAULT_TASK_TIMEOUT_S,
+        close_join_timeout_s: float = _DEFAULT_CLOSE_JOIN_TIMEOUT_S,
     ) -> None:
         self._config_path = config_path
         self._default_timeframe = timeframe
@@ -116,6 +148,8 @@ class BinancePublisher:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._worker: threading.Thread | None = None
         self._task_queue: queue.Queue[object] = queue.Queue()
+        self._task_timeout_s = task_timeout_s
+        self._close_join_timeout_s = close_join_timeout_s
 
     def _load_config(self) -> AppConfig:
         """加载 binance-service 的 AppConfig（完整配置来自 YAML 文件）。"""
@@ -180,7 +214,7 @@ class BinancePublisher:
             logger.info("BinancePublisher worker 线程已启动")
 
     def _worker_loop(self) -> None:
-        """worker 线程主循环：串行消费任务直至收到哨兵。
+        """worker 线程主循环：串行消费任务直至队列空 60s 超时退出。
 
         浏览器在**队列排空**时才释放（而非每个任务后）：一批密集到达的
         任务复用同一个浏览器实例，只在队列彻底空、无待发任务时关闭 Chrome。
@@ -193,28 +227,27 @@ class BinancePublisher:
         改用 get_nowait 原子取可消除该窗口，但当前简洁性优先。
         """
         while True:
-            task = self._task_queue.get()
-            try:
-                if task is self._SHUTDOWN:
-                    return
 
+            task_done = False
+            try:
+                task = self._task_queue.get(timeout=60)
                 assert isinstance(task, _PublishTask)
                 self._process_task(task)
-
-            finally:
-                self._task_queue.task_done()
-
-            if self._task_queue.empty():
+                task_done = True
+            except queue.Empty:
                 self._release_service_on_worker()
+                return
+            finally:
+                if task_done:
+                    self._task_queue.task_done()
 
 
     def _process_task(self, task: _PublishTask) -> None:
-        """在 worker 线程内执行单个发布任务：open+postx + 调度回调。
+        timer = _timeout_exit(self._task_timeout_s, lambda : logger.error(
+            "发布任务超时（>%ss），重启服务: publish_id=%s",
+            self._task_timeout_s, task.publish_id
+        ))
 
-        浏览器由 _worker_loop 在队列排空时统一释放，本方法不关浏览器，
-        以保证一批任务复用同一浏览器实例。
-        开浏览器/发帖的任何异常都转 on_failure，不向外抛（避免杀死 worker）。
-        """
         try:
             service = self._get_service_unsafe()
             link = service.create_postx(
@@ -231,31 +264,36 @@ class BinancePublisher:
             else:
                 self._dispatch_success(task.publish_id, link)
         except Exception as e:
-            logger.exception("_process_task")
             self._release_service_on_worker()
             self._dispatch_failure(task.publish_id, str(e))
+        finally:
+            timer.cancel()
 
     # ── 回调调度：worker 线程 -> 事件循环线程 ─────────────────
 
     def _dispatch_success(self, publish_id: str, share_link: str) -> None:
         """把 on_success 调度到事件循环线程。"""
         if self._callbacks is None or self._loop is None:
-            logger.warning(
-                "发布成功但回调/loop 未配置，丢弃结果（publish_id=%s, link=%s）",
-                publish_id, share_link,
-            )
+            logger.warning("发布成功但回调/loop 未配置，丢弃结果（publish_id=%s, link=%s）",publish_id, share_link)
             return
+
+        if self._loop.is_closed():
+            logger.warning("发布成功但事件循环已关闭，丢弃结果（publish_id=%s, link=%s）",publish_id, share_link)
+            return
+
         coro = self._callbacks.on_success(publish_id, share_link)
         self._loop.call_soon_threadsafe(asyncio.create_task, coro)
 
     def _dispatch_failure(self, publish_id: str, error: str) -> None:
         """把 on_failure 调度到事件循环线程。"""
         if self._callbacks is None or self._loop is None:
-            logger.warning(
-                "发布失败但回调/loop 未配置，丢弃结果（publish_id=%s, error=%s）",
-                publish_id, error,
-            )
+            logger.warning("发布失败但回调/loop 未配置，丢弃结果（publish_id=%s, error=%s）",publish_id, error)
             return
+
+        if self._loop.is_closed():
+            logger.warning("发布失败但事件循环已关闭，丢弃结果（publish_id=%s, error=%s）",publish_id, error)
+            return
+
         coro = self._callbacks.on_failure(publish_id, error)
         self._loop.call_soon_threadsafe(asyncio.create_task, coro)
 
@@ -288,41 +326,16 @@ class BinancePublisher:
     # ── 关闭 ─────────────────────────────────────────────────
 
     def close(self) -> None:
-        """让 worker 线程退出。可重复调用。
-
-        worker 在跑时投哨兵、等其退出，再排空队列中残留的未消费任务
-        （旧 worker 已死，单线程操作队列安全），并释放可能残留的浏览器。
-        队列对象终身不变，避免 _ensure_worker 重建队列导致的新旧 worker 竞态。
-        """
-        with _LOCK:
-            worker = self._worker
-            if worker is None:
-                return
-            self._task_queue.put(self._SHUTDOWN)
-            self._worker = None
-        worker.join(timeout=10.0)
-        if worker.is_alive():
-            logger.warning("BinancePublisher worker 线程未在 10s 内退出")
-        # 旧 worker 已退出，排空残留任务并释放浏览器
         self._drain_residual_tasks()
         self._release_service_on_worker()
 
     def _drain_residual_tasks(self) -> None:
-        """排空队列中残留的未消费任务（close 后调用，单线程安全）。
-
-        每个 get_nowait 都配一次 task_done，保持队列计数器平衡。
-        """
         while True:
             try:
-                task = self._task_queue.get_nowait()
+                self._task_queue.get_nowait()
             except queue.Empty:
                 return
-            try:
-                if task is self._SHUTDOWN:
-                    continue
-                logger.warning(f"close 时丢弃未消费的发布任务: {task}")
-            finally:
-                self._task_queue.task_done()
+            self._task_queue.task_done()
 
 
 def resolve_base_asset(symbol: str) -> str:
